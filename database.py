@@ -26,6 +26,7 @@ async def init_db():
         )
         """)
         
+        # Yangi ustun qo'shish (agar mavjud bo'lmasa)
         try:
             await db.execute("ALTER TABLE listings ADD COLUMN media_group TEXT")
         except:
@@ -38,16 +39,24 @@ async def add_listing(**kwargs):
         print("=" * 50)
         print("📝 E'lon qo'shilmoqda:")
         for key, value in kwargs.items():
-            print(f"   {key}: {value}")
+            if key == 'media_group':
+                print(f"   {key}: {len(value)} ta rasm")
+            else:
+                print(f"   {key}: {value}")
         print("=" * 50)
         
         try:
+            # MEDIA_GROUP ni JSON formatda saqlash
             if 'media_group' in kwargs and kwargs['media_group']:
-                media_group_json = json.dumps(kwargs['media_group'])
-                image_url = kwargs.get('media_group', [None])[0]
+                media_group_list = kwargs['media_group']
+                media_group_json = json.dumps(media_group_list)
+                # Birinchi rasmni image_url sifatida saqlaymiz
+                image_url = media_group_list[0] if media_group_list else None
+                print(f"   📸 {len(media_group_list)} ta rasm saqlanyapti")
             else:
                 media_group_json = None
                 image_url = kwargs.get('image_url', None)
+                print(f"   📸 Rasm yo'q")
             
             await db.execute("""
             INSERT INTO listings (
@@ -86,7 +95,21 @@ async def get_all_listings(district, category):
         WHERE district = ? AND category = ? AND status = 'active'
         ORDER BY id DESC
         """, (district, category))
-        return await cursor.fetchall()
+        
+        rows = await cursor.fetchall()
+        
+        # Har bir qator uchun media_group ni JSON dan o'qish
+        result = []
+        for row in rows:
+            row_dict = dict(row)
+            if row_dict.get('media_group'):
+                try:
+                    row_dict['media_group'] = json.loads(row_dict['media_group'])
+                except:
+                    row_dict['media_group'] = None
+            result.append(row_dict)
+        
+        return result
 
 async def increment_views(listing_id):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -104,13 +127,18 @@ async def get_listing_by_id(listing_id):
         cursor = await db.execute("SELECT * FROM listings WHERE id=?", (listing_id,))
         row = await cursor.fetchone()
         
-        if row and row['media_group']:
-            media_group = json.loads(row['media_group'])
+        if row:
             row_dict = dict(row)
-            row_dict['media_group'] = media_group
+            if row_dict.get('media_group'):
+                try:
+                    row_dict['media_group'] = json.loads(row_dict['media_group'])
+                    print(f"📸 media_group yuklandi: {len(row_dict['media_group'])} ta rasm")
+                except:
+                    row_dict['media_group'] = None
+                    print("❌ media_group JSON yuklanmadi")
             return row_dict
         
-        return row
+        return None
 
 async def get_admin_statistics():
     async with aiosqlite.connect(DB_NAME) as db:
