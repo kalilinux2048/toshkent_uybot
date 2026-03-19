@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InputMediaPhoto
 
 from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS
-from database import init_db, get_all_listings, increment_views, get_listing_by_id
+from database import init_db, get_all_listings, increment_views, get_listing_by_id, delete_listing_by_id, update_listing_status
 from keyboards import (
     get_regions_keyboard,
     get_districts_keyboard,
@@ -168,7 +168,6 @@ async def show_listing(message, listing, region_key, district_callback, cat_key,
         final_kb = nav_kb
     
     try:
-        # MEDIA GROUP (bir nechta rasm) uchun
         if listing.get('media_group') and len(listing['media_group']) > 1:
             media = []
             for i, photo_id in enumerate(listing['media_group']):
@@ -180,7 +179,6 @@ async def show_listing(message, listing, region_key, district_callback, cat_key,
             await message.answer_media_group(media=media)
             await message.answer("📌 Amallar:", reply_markup=final_kb)
             
-        # Bitta rasm bo'lsa
         elif listing.get('image_url'):
             await message.answer_photo(
                 listing['image_url'], 
@@ -249,6 +247,7 @@ async def view_listing_by_id(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Xatolik: {e}")
 
+# ADMIN TEZKOR TUGMALAR
 @dp.callback_query(F.data.startswith("admin_delete_"))
 async def admin_quick_delete(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -256,9 +255,8 @@ async def admin_quick_delete(callback: types.CallbackQuery):
         return
     
     listing_id = int(callback.data.replace("admin_delete_", ""))
-    from database import delete_listing_by_id
     await delete_listing_by_id(listing_id)
-    await callback.answer("✅ O'chirildi!")
+    await callback.answer("✅ E'lon o'chirildi!")
     await callback.message.delete()
 
 @dp.callback_query(F.data.startswith("admin_sold_"))
@@ -268,9 +266,12 @@ async def admin_quick_sold(callback: types.CallbackQuery):
         return
     
     listing_id = int(callback.data.replace("admin_sold_", ""))
-    from database import update_listing_status
     await update_listing_status(listing_id, 'sold')
     await callback.answer("✅ Sotilgan deb belgilandi!")
+    
+    if callback.message.caption:
+        new_text = callback.message.caption + "\n\n✅ HOLAT: SOTILGAN"
+        await callback.message.edit_caption(caption=new_text)
 
 @dp.callback_query(F.data.startswith("admin_rented_"))
 async def admin_quick_rented(callback: types.CallbackQuery):
@@ -279,9 +280,12 @@ async def admin_quick_rented(callback: types.CallbackQuery):
         return
     
     listing_id = int(callback.data.replace("admin_rented_", ""))
-    from database import update_listing_status
     await update_listing_status(listing_id, 'rented')
     await callback.answer("✅ Ijaraga berilgan deb belgilandi!")
+    
+    if callback.message.caption:
+        new_text = callback.message.caption + "\n\n✅ HOLAT: IJARAGA BERILGAN"
+        await callback.message.edit_caption(caption=new_text)
 
 async def main():
     await init_db()
