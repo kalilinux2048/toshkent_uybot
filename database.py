@@ -26,7 +26,7 @@ async def init_db():
         )
         """)
         
-        # Yangi ustun qo'shish (agar mavjud bo'lmasa)
+        # Yangi ustun qo'shish
         try:
             await db.execute("ALTER TABLE listings ADD COLUMN media_group TEXT")
         except:
@@ -36,27 +36,14 @@ async def init_db():
 
 async def add_listing(**kwargs):
     async with aiosqlite.connect(DB_NAME) as db:
-        print("=" * 50)
-        print("📝 E'lon qo'shilmoqda:")
-        for key, value in kwargs.items():
-            if key == 'media_group':
-                print(f"   {key}: {len(value)} ta rasm")
-            else:
-                print(f"   {key}: {value}")
-        print("=" * 50)
-        
         try:
-            # MEDIA_GROUP ni JSON formatda saqlash
             if 'media_group' in kwargs and kwargs['media_group']:
                 media_group_list = kwargs['media_group']
                 media_group_json = json.dumps(media_group_list)
-                # Birinchi rasmni image_url sifatida saqlaymiz
                 image_url = media_group_list[0] if media_group_list else None
-                print(f"   📸 {len(media_group_list)} ta rasm saqlanyapti")
             else:
                 media_group_json = None
                 image_url = kwargs.get('image_url', None)
-                print(f"   📸 Rasm yo'q")
             
             await db.execute("""
             INSERT INTO listings (
@@ -80,8 +67,6 @@ async def add_listing(**kwargs):
             
             cursor = await db.execute("SELECT last_insert_rowid()")
             last_id = await cursor.fetchone()
-            print(f"✅ E'lon bazaga qo'shildi! ID: {last_id[0]}")
-            
             return last_id[0]
         except Exception as e:
             print(f"❌ Xatolik: {e}")
@@ -97,9 +82,8 @@ async def get_all_listings(district, category):
         """, (district, category))
         
         rows = await cursor.fetchall()
-        
-        # Har bir qator uchun media_group ni JSON dan o'qish
         result = []
+        
         for row in rows:
             row_dict = dict(row)
             if row_dict.get('media_group'):
@@ -132,10 +116,8 @@ async def get_listing_by_id(listing_id):
             if row_dict.get('media_group'):
                 try:
                     row_dict['media_group'] = json.loads(row_dict['media_group'])
-                    print(f"📸 media_group yuklandi: {len(row_dict['media_group'])} ta rasm")
                 except:
                     row_dict['media_group'] = None
-                    print("❌ media_group JSON yuklanmadi")
             return row_dict
         
         return None
@@ -159,25 +141,13 @@ async def get_admin_statistics():
         cursor = await db.execute("SELECT SUM(views_count) as total FROM listings")
         total_views = (await cursor.fetchone())['total'] or 0
         
-        cursor = await db.execute("""
-            SELECT category, COUNT(*) as count 
-            FROM listings WHERE status='active'
-            GROUP BY category
-        """)
+        cursor = await db.execute("SELECT category, COUNT(*) as count FROM listings WHERE status='active' GROUP BY category")
         categories = await cursor.fetchall()
         
-        cursor = await db.execute("""
-            SELECT region, COUNT(*) as count 
-            FROM listings WHERE status='active'
-            GROUP BY region ORDER BY count DESC LIMIT 5
-        """)
+        cursor = await db.execute("SELECT region, COUNT(*) as count FROM listings WHERE status='active' GROUP BY region ORDER BY count DESC LIMIT 5")
         regions = await cursor.fetchall()
         
-        cursor = await db.execute("""
-            SELECT district, COUNT(*) as count 
-            FROM listings WHERE status='active'
-            GROUP BY district ORDER BY count DESC LIMIT 5
-        """)
+        cursor = await db.execute("SELECT district, COUNT(*) as count FROM listings WHERE status='active' GROUP BY district ORDER BY count DESC LIMIT 5")
         districts = await cursor.fetchall()
         
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
