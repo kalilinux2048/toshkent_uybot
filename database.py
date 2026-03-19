@@ -1,5 +1,6 @@
 import aiosqlite
 from datetime import datetime, timedelta
+import json
 
 DB_NAME = "database.db"
 
@@ -17,6 +18,7 @@ async def init_db():
             description TEXT,
             phone TEXT,
             image_url TEXT,
+            media_group TEXT,
             views_count INTEGER DEFAULT 0,
             status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -25,35 +27,9 @@ async def init_db():
         """)
         
         try:
-            await db.execute("ALTER TABLE listings ADD COLUMN region TEXT DEFAULT 'tashkent_city'")
+            await db.execute("ALTER TABLE listings ADD COLUMN media_group TEXT")
         except:
             pass
-        
-        try:
-            await db.execute("ALTER TABLE listings ADD COLUMN status TEXT DEFAULT 'active'")
-        except:
-            pass
-        
-        try:
-            await db.execute("ALTER TABLE listings ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-        except:
-            pass
-        
-        await db.execute("UPDATE listings SET region='tashkent_city' WHERE region IS NULL")
-        await db.execute("UPDATE listings SET status='active' WHERE status IS NULL")
-        await db.commit()
-        
-        # Bazadagi barcha e'lonlarni ko'rish
-        cursor = await db.execute("SELECT COUNT(*) as count FROM listings")
-        count = await cursor.fetchone()
-        print(f"📊 Bazada jami {count[0]} ta e'lon bor")
-        
-        if count[0] > 0:
-            cursor = await db.execute("SELECT id, district, category, status FROM listings LIMIT 5")
-            rows = await cursor.fetchall()
-            print("📋 Oxirgi 5 e'lon:")
-            for row in rows:
-                print(f"   ID: {row[0]}, Tuman: {row[1]}, Kategoriya: {row[2]}, Status: {row[3]}")
         
         print("✅ Ma'lumotlar bazasi tayyor")
 
@@ -66,9 +42,19 @@ async def add_listing(**kwargs):
         print("=" * 50)
         
         try:
+            if 'media_group' in kwargs and kwargs['media_group']:
+                media_group_json = json.dumps(kwargs['media_group'])
+                image_url = kwargs.get('media_group', [None])[0]
+            else:
+                media_group_json = None
+                image_url = kwargs.get('image_url', None)
+            
             await db.execute("""
-            INSERT INTO listings (region, district, category, title, price, rooms, description, phone, image_url, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+            INSERT INTO listings (
+                region, district, category, title, price, rooms, 
+                description, phone, image_url, media_group, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
             """, (
                 kwargs.get('region', 'tashkent_city'),
                 kwargs['district'],
@@ -78,7 +64,8 @@ async def add_listing(**kwargs):
                 kwargs['rooms'],
                 kwargs['description'],
                 kwargs['phone'],
-                kwargs['image_url']
+                image_url,
+                media_group_json
             ))
             await db.commit()
             
@@ -92,26 +79,14 @@ async def add_listing(**kwargs):
             raise e
 
 async def get_all_listings(district, category):
-    """Barcha e'lonlarni olish (sahifalarsiz)"""
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
-        
-        print(f"🔍 Qidiruv: district='{district}', category='{category}'")
-
         cursor = await db.execute("""
         SELECT * FROM listings
         WHERE district = ? AND category = ? AND status = 'active'
         ORDER BY id DESC
         """, (district, category))
-
-        listings = await cursor.fetchall()
-        print(f"   Topildi: {len(listings)} ta e'lon")
-        
-        # Debug: topilgan e'lonlarning ID larini ko'rsatish
-        for i, listing in enumerate(listings):
-            print(f"   E'lon {i+1}: ID={listing['id']}")
-
-    return listings
+        return await cursor.fetchall()
 
 async def increment_views(listing_id):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -122,13 +97,20 @@ async def delete_listing_by_id(listing_id):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("DELETE FROM listings WHERE id = ?", (listing_id,))
         await db.commit()
-        print(f"✅ {listing_id} ID li e'lon o'chirildi")
 
 async def get_listing_by_id(listing_id):
     async with aiosqlite.connect(DB_NAME) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM listings WHERE id=?", (listing_id,))
-        return await cursor.fetchone()
+        row = await cursor.fetchone()
+        
+        if row and row['media_group']:
+            media_group = json.loads(row['media_group'])
+            row_dict = dict(row)
+            row_dict['media_group'] = media_group
+            return row_dict
+        
+        return row
 
 async def get_admin_statistics():
     async with aiosqlite.connect(DB_NAME) as db:
@@ -151,46 +133,30 @@ async def get_admin_statistics():
         
         cursor = await db.execute("""
             SELECT category, COUNT(*) as count 
-            FROM listings 
-            WHERE status='active'
+            FROM listings WHERE status='active'
             GROUP BY category
         """)
         categories = await cursor.fetchall()
         
         cursor = await db.execute("""
             SELECT region, COUNT(*) as count 
-            FROM listings 
-            WHERE status='active'
-            GROUP BY region
-            ORDER BY count DESC
-            LIMIT 5
+            FROM listings WHERE status='active'
+            GROUP BY region ORDER BY count DESC LIMIT 5
         """)
         regions = await cursor.fetchall()
         
         cursor = await db.execute("""
             SELECT district, COUNT(*) as count 
-            FROM listings 
-            WHERE status='active'
-            GROUP BY district
-            ORDER BY count DESC
-            LIMIT 5
+            FROM listings WHERE status='active'
+            GROUP BY district ORDER BY count DESC LIMIT 5
         """)
         districts = await cursor.fetchall()
         
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
-        cursor = await db.execute("""
-            SELECT COUNT(*) as count 
-            FROM listings 
-            WHERE created_at > ?
-        """, (week_ago,))
+        cursor = await db.execute("SELECT COUNT(*) as count FROM listings WHERE created_at > ?", (week_ago,))
         last_week = (await cursor.fetchone())['count']
         
-        cursor = await db.execute("""
-            SELECT title, views_count 
-            FROM listings 
-            ORDER BY views_count DESC 
-            LIMIT 5
-        """)
+        cursor = await db.execute("SELECT title, views_count FROM listings ORDER BY views_count DESC LIMIT 5")
         top_listings = await cursor.fetchall()
         
         return {
@@ -208,10 +174,5 @@ async def get_admin_statistics():
 
 async def update_listing_status(listing_id, status):
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            UPDATE listings 
-            SET status=?, updated_at=CURRENT_TIMESTAMP 
-            WHERE id=?
-        """, (status, listing_id))
+        await db.execute("UPDATE listings SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", (status, listing_id))
         await db.commit()
-        print(f"✅ {listing_id} ID li e'lon statusi '{status}' ga o'zgartirildi")
