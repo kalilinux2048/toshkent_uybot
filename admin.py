@@ -20,6 +20,7 @@ class AddListingStates(StatesGroup):
     phone = State()
     images = State()
 
+# ADMIN PANEL
 @admin_router.message(Command("admin"))
 async def admin_panel(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -33,6 +34,7 @@ async def admin_panel(message: types.Message):
     kb.adjust(1)
     await message.answer("👨‍💼 Admin panel", reply_markup=kb.as_markup())
 
+# STATISTIKA
 @admin_router.callback_query(F.data == "admin_stats")
 async def show_statistics(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -87,6 +89,7 @@ async def show_statistics(callback: types.CallbackQuery):
     kb.adjust(1)
     await callback.message.edit_text(text, reply_markup=kb.as_markup())
 
+# O'CHIRISH MENYUSI
 @admin_router.callback_query(F.data == "delete_listing_menu")
 async def delete_menu(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -97,10 +100,12 @@ async def delete_menu(callback: types.CallbackQuery):
     kb.adjust(1)
     await callback.message.edit_text(
         "❌ E'lonni o'chirish uchun e'lon ID sini yuboring.\n\n"
+        "E'lon ID sini e'lon tagidagi '🆔 ID: ...' qatoridan topishingiz mumkin.\n\n"
         "Format: /delete 123",
         reply_markup=kb.as_markup()
     )
 
+# O'CHIRISH KOMANDASI
 @admin_router.message(Command("delete"))
 async def delete_listing(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -131,6 +136,7 @@ async def delete_listing(message: types.Message):
     except (IndexError, ValueError):
         await message.answer("❌ Noto'g'ri format. To'g'ri format: /delete 123")
 
+# O'CHIRISHNI TASDIQLASH
 @admin_router.callback_query(F.data.startswith("confirm_delete_"))
 async def confirm_delete(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -142,8 +148,12 @@ async def confirm_delete(callback: types.CallbackQuery):
     kb = InlineKeyboardBuilder()
     kb.button(text="🔙 Admin panel", callback_data="back_to_admin")
     kb.adjust(1)
-    await callback.message.edit_text(f"✅ {listing_id} ID li e'lon o'chirildi!", reply_markup=kb.as_markup())
+    await callback.message.edit_text(
+        f"✅ {listing_id} ID li e'lon muvaffaqiyatli o'chirildi!",
+        reply_markup=kb.as_markup()
+    )
 
+# STATUS YANGILASH MENYUSI
 @admin_router.callback_query(F.data == "update_status_menu")
 async def update_status_menu(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -153,13 +163,16 @@ async def update_status_menu(callback: types.CallbackQuery):
     kb.button(text="🔙 Admin panel", callback_data="back_to_admin")
     kb.adjust(1)
     await callback.message.edit_text(
-        "✅ E'lon holatini yangilash uchun:\n"
-        "/sold 123 - Sotilgan\n"
-        "/rented 123 - Ijaraga berilgan\n"
-        "/active 123 - Qayta faollashtirish",
+        "✅ E'lon holatini yangilash uchun ID va holatni yuboring.\n\n"
+        "Formatlar:\n"
+        "/sold 123 - Sotilgan deb belgilash\n"
+        "/rented 123 - Ijaraga berilgan deb belgilash\n"
+        "/active 123 - Qayta faollashtirish\n\n"
+        "E'lon ID sini e'lon tagidagi '🆔 ID: ...' qatoridan topishingiz mumkin.",
         reply_markup=kb.as_markup()
     )
 
+# SOTILGAN
 @admin_router.message(Command("sold"))
 async def mark_as_sold(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -167,11 +180,18 @@ async def mark_as_sold(message: types.Message):
     
     try:
         listing_id = int(message.text.split()[1])
+        listing = await get_listing_by_id(listing_id)
+        
+        if not listing:
+            await message.answer("❌ Bunday ID bilan e'lon topilmadi!")
+            return
+        
         await update_listing_status(listing_id, 'sold')
         await message.answer(f"✅ {listing_id} ID li e'lon 'Sotilgan' deb belgilandi!")
-    except:
-        await message.answer("❌ Noto'g'ri format. /sold 123")
+    except (IndexError, ValueError):
+        await message.answer("❌ Noto'g'ri format. To'g'ri format: /sold 123")
 
+# IJARAGA BERILGAN
 @admin_router.message(Command("rented"))
 async def mark_as_rented(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -179,11 +199,18 @@ async def mark_as_rented(message: types.Message):
     
     try:
         listing_id = int(message.text.split()[1])
+        listing = await get_listing_by_id(listing_id)
+        
+        if not listing:
+            await message.answer("❌ Bunday ID bilan e'lon topilmadi!")
+            return
+        
         await update_listing_status(listing_id, 'rented')
         await message.answer(f"✅ {listing_id} ID li e'lon 'Ijaraga berilgan' deb belgilandi!")
-    except:
-        await message.answer("❌ Noto'g'ri format. /rented 123")
+    except (IndexError, ValueError):
+        await message.answer("❌ Noto'g'ri format. To'g'ri format: /rented 123")
 
+# QAYTA FAOLLASHTIRISH
 @admin_router.message(Command("active"))
 async def mark_as_active(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -191,11 +218,18 @@ async def mark_as_active(message: types.Message):
     
     try:
         listing_id = int(message.text.split()[1])
+        listing = await get_listing_by_id(listing_id)
+        
+        if not listing:
+            await message.answer("❌ Bunday ID bilan e'lon topilmadi!")
+            return
+        
         await update_listing_status(listing_id, 'active')
         await message.answer(f"✅ {listing_id} ID li e'lon qayta faollashtirildi!")
-    except:
-        await message.answer("❌ Noto'g'ri format. /active 123")
+    except (IndexError, ValueError):
+        await message.answer("❌ Noto'g'ri format. To'g'ri format: /active 123")
 
+# ADMIN PANELGA QAYTISH
 @admin_router.callback_query(F.data == "back_to_admin")
 async def back_to_admin(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
@@ -209,6 +243,7 @@ async def back_to_admin(callback: types.CallbackQuery):
     kb.adjust(1)
     await callback.message.edit_text("👨‍💼 Admin panel", reply_markup=kb.as_markup())
 
+# E'LON QO'SHISH - VILOYAT TANLASH
 @admin_router.callback_query(F.data == "add_listing")
 async def start_add(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id not in ADMIN_IDS:
@@ -221,6 +256,7 @@ async def start_add(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("📍 Viloyatni tanlang:", reply_markup=kb.as_markup())
     await state.set_state(AddListingStates.region)
 
+# VILOYAT TANLASH
 @admin_router.callback_query(F.data.startswith("add_region_"))
 async def add_select_region(callback: types.CallbackQuery, state: FSMContext):
     region_key = callback.data.replace("add_region_", "")
@@ -237,6 +273,7 @@ async def add_select_region(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("📍 Tumanni tanlang:", reply_markup=kb.as_markup())
     await state.set_state(AddListingStates.district)
 
+# TUMAN TANLASH
 @admin_router.callback_query(F.data.startswith("d_"))
 async def set_district(callback: types.CallbackQuery, state: FSMContext):
     district_callback = callback.data[2:]
@@ -251,6 +288,7 @@ async def set_district(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("📂 Kategoriya:", reply_markup=kb.as_markup())
     await state.set_state(AddListingStates.category)
 
+# KATEGORIYA TANLASH
 @admin_router.callback_query(F.data.startswith("c_"))
 async def set_category(callback: types.CallbackQuery, state: FSMContext):
     key = callback.data[2:]
@@ -260,30 +298,35 @@ async def set_category(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("📝 Sarlavha yozing:")
     await state.set_state(AddListingStates.title)
 
+# SARLAVHA
 @admin_router.message(AddListingStates.title)
 async def set_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
     await message.answer("💰 Narx (so'mda):")
     await state.set_state(AddListingStates.price)
 
+# NARX
 @admin_router.message(AddListingStates.price)
 async def set_price(message: types.Message, state: FSMContext):
     await state.update_data(price=message.text)
     await message.answer("🛏 Xonalar soni:")
     await state.set_state(AddListingStates.rooms)
 
+# XONALAR SONI
 @admin_router.message(AddListingStates.rooms)
 async def set_rooms(message: types.Message, state: FSMContext):
     await state.update_data(rooms=message.text)
     await message.answer("📝 Tavsif yozing:")
     await state.set_state(AddListingStates.description)
 
+# TAVSIF
 @admin_router.message(AddListingStates.description)
 async def set_desc(message: types.Message, state: FSMContext):
     await state.update_data(description=message.text)
     await message.answer("📞 Telefon raqam:")
     await state.set_state(AddListingStates.phone)
 
+# TELEFON
 @admin_router.message(AddListingStates.phone)
 async def set_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
@@ -302,7 +345,6 @@ async def add_image(message: types.Message, state: FSMContext):
     data = await state.get_data()
     images = data.get('images', [])
     
-    # Rasm ID sini saqlash
     photo_id = message.photo[-1].file_id
     images.append(photo_id)
     
@@ -330,7 +372,6 @@ async def skip_images(message: types.Message, state: FSMContext):
     await message.answer("✅ Rasmsiz e'lon qo'shilmoqda...")
     await save_listing(message, state)
 
-# BOSHQA MATNLARNI TO'SIB QO'YISH
 @admin_router.message(AddListingStates.images)
 async def invalid_input(message: types.Message, state: FSMContext):
     await message.answer(
@@ -341,7 +382,6 @@ async def save_listing(message: types.Message, state: FSMContext):
     try:
         data = await state.get_data()
         
-        # Kerakli maydonlarni tekshirish
         required_fields = ['region', 'district', 'category', 'title', 'price', 'rooms', 'description', 'phone']
         missing_fields = [field for field in required_fields if field not in data]
         
@@ -353,11 +393,9 @@ async def save_listing(message: types.Message, state: FSMContext):
         images = data.get('images', [])
         
         if images:
-            # Bir nechta rasm bo'lsa
             await add_listing(**data, media_group=images, image_url=images[0])
             await message.answer(f"✅ E'lon muvaffaqiyatli qo'shildi! {len(images)} ta rasm bilan.")
         else:
-            # Rasm yo'q bo'lsa
             await add_listing(**data, image_url=None)
             await message.answer("✅ E'lon muvaffaqiyatli qo'shildi! (rasmsiz)")
         
