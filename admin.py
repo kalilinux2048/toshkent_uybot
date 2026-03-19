@@ -287,9 +287,13 @@ async def set_desc(message: types.Message, state: FSMContext):
 @admin_router.message(AddListingStates.phone)
 async def set_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
-    await message.answer("📸 **Rasmlarni yuboring**\n\n"
-                        "Bir nechta rasm yuboring. Tugatgach, **'done'** deb yozing.\n"
-                        "Rasm yo'q bo'lsa, **'skip'** deb yozing.")
+    await message.answer(
+        "📸 **RASMLARNI YUBORING**\n\n"
+        "Bir nechta rasm yuborishingiz mumkin.\n"
+        "Har bir rasm uchun alohida yuboring.\n"
+        "Barcha rasmlarni yuborib bo'lgach, **'done'** deb yozing.\n"
+        "Agar rasm yo'q bo'lsa, **'skip'** deb yozing."
+    )
     await state.update_data(images=[])
     await state.set_state(AddListingStates.images)
 
@@ -297,10 +301,16 @@ async def set_phone(message: types.Message, state: FSMContext):
 async def add_image(message: types.Message, state: FSMContext):
     data = await state.get_data()
     images = data.get('images', [])
+    
+    # Rasm ID sini saqlash
     photo_id = message.photo[-1].file_id
     images.append(photo_id)
+    
     await state.update_data(images=images)
-    await message.answer(f"✅ Rasm qo'shildi! Jami: {len(images)} ta rasm.")
+    await message.answer(
+        f"✅ Rasm qo'shildi! Jami: {len(images)} ta rasm.\n"
+        f"Yana rasm yuboring yoki tugatish uchun 'done' deb yozing."
+    )
 
 @admin_router.message(AddListingStates.images, F.text.lower() == "done")
 async def finish_images(message: types.Message, state: FSMContext):
@@ -308,29 +318,51 @@ async def finish_images(message: types.Message, state: FSMContext):
     images = data.get('images', [])
     
     if not images:
-        await message.answer("❌ Hech qanday rasm yubormadingiz. 'skip' deb yozing.")
+        await message.answer("❌ Hech qanday rasm yubormadingiz. 'skip' deb yozib o'tkazib yuborishingiz mumkin.")
         return
     
+    await message.answer(f"✅ {len(images)} ta rasm saqlandi. E'lon qo'shilmoqda...")
     await save_listing(message, state)
 
 @admin_router.message(AddListingStates.images, F.text.lower() == "skip")
 async def skip_images(message: types.Message, state: FSMContext):
     await state.update_data(images=[])
+    await message.answer("✅ Rasmsiz e'lon qo'shilmoqda...")
     await save_listing(message, state)
+
+# BOSHQA MATNLARNI TO'SIB QO'YISH
+@admin_router.message(AddListingStates.images)
+async def invalid_input(message: types.Message, state: FSMContext):
+    await message.answer(
+        "❌ Noto'g'ri format. Iltimos, rasm yuboring yoki 'done' / 'skip' deb yozing."
+    )
 
 async def save_listing(message: types.Message, state: FSMContext):
     try:
         data = await state.get_data()
+        
+        # Kerakli maydonlarni tekshirish
+        required_fields = ['region', 'district', 'category', 'title', 'price', 'rooms', 'description', 'phone']
+        missing_fields = [field for field in required_fields if field not in data]
+        
+        if missing_fields:
+            await message.answer(f"❌ Xatolik: {missing_fields} maydonlari topilmadi. Qaytadan urinib ko'ring.")
+            await state.clear()
+            return
+        
         images = data.get('images', [])
         
         if images:
+            # Bir nechta rasm bo'lsa
             await add_listing(**data, media_group=images, image_url=images[0])
-            await message.answer(f"✅ E'lon qo'shildi! {len(images)} ta rasm bilan.")
+            await message.answer(f"✅ E'lon muvaffaqiyatli qo'shildi! {len(images)} ta rasm bilan.")
         else:
+            # Rasm yo'q bo'lsa
             await add_listing(**data, image_url=None)
-            await message.answer("✅ E'lon qo'shildi! (rasmsiz)")
+            await message.answer("✅ E'lon muvaffaqiyatli qo'shildi! (rasmsiz)")
         
         await state.clear()
     except Exception as e:
+        print(f"❌ Xatolik: {e}")
         await message.answer(f"❌ Xatolik: {e}")
         await state.clear()
