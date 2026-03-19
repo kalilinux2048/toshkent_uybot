@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import MediaGroup
+from aiogram.types import InputMediaPhoto  # O'ZGARTIRILDI: MediaGroup o'rniga
 
 from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS
 from database import init_db, get_all_listings, increment_views, get_listing_by_id
@@ -169,11 +169,14 @@ async def show_listing(message, listing, region_key, district_callback, cat_key,
     
     try:
         if listing.get('media_group') and len(listing['media_group']) > 1:
-            media_group = MediaGroup()
-            media_group.attach_photo(listing['media_group'][0], caption=text)
-            for photo_id in listing['media_group'][1:]:
-                media_group.attach_photo(photo_id)
-            await message.answer_media_group(media=media_group)
+            # O'ZGARTIRILDI: MediaGroup o'rniga InputMediaPhoto ishlatish
+            media = []
+            for i, photo_id in enumerate(listing['media_group']):
+                if i == 0:
+                    media.append(InputMediaPhoto(media=photo_id, caption=text))
+                else:
+                    media.append(InputMediaPhoto(media=photo_id))
+            await message.answer_media_group(media=media)
             await message.answer("Amallar:", reply_markup=final_kb)
         elif listing.get('image_url'):
             await message.answer_photo(listing['image_url'], caption=text, reply_markup=final_kb)
@@ -217,11 +220,14 @@ async def view_listing_by_id(message: types.Message):
             kb = admin_kb.as_markup()
         
         if listing.get('media_group') and len(listing['media_group']) > 1:
-            media_group = MediaGroup()
-            media_group.attach_photo(listing['media_group'][0], caption=text)
-            for photo_id in listing['media_group'][1:]:
-                media_group.attach_photo(photo_id)
-            await message.answer_media_group(media=media_group)
+            # O'ZGARTIRILDI: MediaGroup o'rniga InputMediaPhoto ishlatish
+            media = []
+            for i, photo_id in enumerate(listing['media_group']):
+                if i == 0:
+                    media.append(InputMediaPhoto(media=photo_id, caption=text))
+                else:
+                    media.append(InputMediaPhoto(media=photo_id))
+            await message.answer_media_group(media=media)
             if kb:
                 await message.answer("Amallar:", reply_markup=kb)
         elif listing.get('image_url'):
