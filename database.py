@@ -3,36 +3,46 @@ import json
 import os
 from datetime import datetime, timedelta
 
-# PostgreSQL manzili Railway avtomatik qo'shadi
-DATABASE_URL = os.getenv('DATABASE_URL')
-
 async def init_db():
-    conn = await asyncpg.connect(DATABASE_URL)
-    
-    await conn.execute("""
-    CREATE TABLE IF NOT EXISTS listings (
-        id SERIAL PRIMARY KEY,
-        region TEXT,
-        district TEXT,
-        category TEXT,
-        title TEXT,
-        price TEXT,
-        rooms TEXT,
-        description TEXT,
-        phone TEXT,
-        image_url TEXT,
-        media_group TEXT,
-        views_count INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'active',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    
-    await conn.close()
-    print("✅ PostgreSQL bazasi tayyor")
+    try:
+        DATABASE_URL = os.getenv('DATABASE_URL')
+        
+        if not DATABASE_URL:
+            print("❌ DATABASE_URL topilmadi! PostgreSQL yaratganmisiz?")
+            return False
+        
+        conn = await asyncpg.connect(DATABASE_URL)
+        
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS listings (
+            id SERIAL PRIMARY KEY,
+            region TEXT,
+            district TEXT,
+            category TEXT,
+            title TEXT,
+            price TEXT,
+            rooms TEXT,
+            description TEXT,
+            phone TEXT,
+            image_url TEXT,
+            media_group TEXT,
+            views_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        await conn.close()
+        print("✅ PostgreSQL bazasi tayyor")
+        return True
+        
+    except Exception as e:
+        print(f"❌ PostgreSQL xatolik: {e}")
+        return False
 
 async def add_listing(**kwargs):
+    DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
     try:
@@ -68,9 +78,11 @@ async def add_listing(**kwargs):
         
     except Exception as e:
         await conn.close()
+        print(f"❌ add_listing xatolik: {e}")
         raise e
 
 async def get_all_listings(district, category):
+    DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
     rows = await conn.fetch("""
@@ -94,16 +106,19 @@ async def get_all_listings(district, category):
     return result
 
 async def increment_views(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     await conn.execute("UPDATE listings SET views_count = views_count + 1 WHERE id = $1", listing_id)
     await conn.close()
 
 async def delete_listing_by_id(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     await conn.execute("DELETE FROM listings WHERE id = $1", listing_id)
     await conn.close()
 
 async def get_listing_by_id(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     row = await conn.fetchrow("SELECT * FROM listings WHERE id = $1", listing_id)
     await conn.close()
@@ -119,6 +134,7 @@ async def get_listing_by_id(listing_id):
     return None
 
 async def get_admin_statistics():
+    DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
     total = await conn.fetchval("SELECT COUNT(*) FROM listings")
@@ -144,6 +160,7 @@ async def get_admin_statistics():
     }
 
 async def update_listing_status(listing_id, status):
+    DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     await conn.execute("UPDATE listings SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", status, listing_id)
     await conn.close()
