@@ -1,6 +1,6 @@
 import asyncio
 import os
-import urllib.parse
+import base64
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -38,6 +38,14 @@ def normalize_text(text):
     if not text:
         return text
     return ' '.join(text.strip().split())
+
+def decode_district(encoded):
+    """Base64 dan tuman nomini dekod qilish"""
+    try:
+        decoded_bytes = base64.b64decode(encoded)
+        return decoded_bytes.decode('utf-8')
+    except:
+        return encoded
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
@@ -87,13 +95,14 @@ async def select_district(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
+        # district_region_key_encoded
         parts = data.split("_", 2)
         if len(parts) < 3:
             raise ValueError("Invalid format")
         
         region_key = parts[1]
         district_encoded = parts[2]
-        district = urllib.parse.unquote(district_encoded)
+        district = decode_district(district_encoded)
         district = normalize_text(district)
         
         await call.message.answer(
@@ -109,20 +118,35 @@ async def select_category(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        parts = data.split("_", 3)
-        if len(parts) < 4:
+        # cat_region_key_district_encoded_cat_key
+        # Barcha _ larni hisobga olib, oxirgi qism cat_key
+        last_underscore = data.rfind('_')
+        if last_underscore == -1:
             raise ValueError("Invalid format")
         
-        region_key = parts[1]
-        district_encoded = parts[2]
-        cat_key = parts[3]
+        cat_key = data[last_underscore + 1:]
+        prefix = data[:last_underscore]
         
-        district = urllib.parse.unquote(district_encoded)
+        # prefix = cat_region_key_district_encoded
+        prefix_parts = prefix.split("_", 2)
+        if len(prefix_parts) < 3:
+            raise ValueError("Invalid format")
+        
+        region_key = prefix_parts[1]
+        district_encoded = prefix_parts[2]
+        
+        district = decode_district(district_encoded)
         district = normalize_text(district)
+        
+        if cat_key not in CATEGORIES:
+            await call.message.answer(f"❌ Xato: '{cat_key}' kategoriyasi topilmadi")
+            return
+        
         cat_name = CATEGORIES[cat_key]
 
         print(f"DEBUG: region_key = '{region_key}'")
         print(f"DEBUG: district = '{district}'")
+        print(f"DEBUG: cat_key = '{cat_key}'")
         print(f"DEBUG: cat_name = '{cat_name}'")
         
         listings = await get_all_listings(district, cat_name)
@@ -152,16 +176,34 @@ async def navigate_listings(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        parts = data.split("_", 4)
-        if len(parts) < 5:
+        # nav_region_key_district_encoded_cat_key_index
+        # Oxirgi _ dan keyin index, undan oldingi qism
+        last_underscore = data.rfind('_')
+        if last_underscore == -1:
             raise ValueError("Invalid format")
         
-        region_key = parts[1]
-        district_encoded = parts[2]
-        cat_key = parts[3]
-        new_index = int(parts[4])
+        index_str = data[last_underscore + 1:]
+        prefix = data[:last_underscore]
         
-        district = urllib.parse.unquote(district_encoded)
+        # prefix = nav_region_key_district_encoded_cat_key
+        # Oxirgi _ dan keyin cat_key
+        second_last_underscore = prefix.rfind('_')
+        if second_last_underscore == -1:
+            raise ValueError("Invalid format")
+        
+        cat_key = prefix[second_last_underscore + 1:]
+        nav_prefix = prefix[:second_last_underscore]
+        
+        # nav_prefix = nav_region_key_district_encoded
+        nav_parts = nav_prefix.split("_", 2)
+        if len(nav_parts) < 3:
+            raise ValueError("Invalid format")
+        
+        region_key = nav_parts[1]
+        district_encoded = nav_parts[2]
+        new_index = int(index_str)
+        
+        district = decode_district(district_encoded)
         district = normalize_text(district)
         cat_name = CATEGORIES[cat_key]
 
