@@ -1,18 +1,14 @@
 import os
 from dotenv import load_dotenv
 
-# .env faylidan ma'lumotlarni yuklash
 load_dotenv()
 
-# BOT_TOKEN endi .env dan olinadi
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 BOT_USERNAME = "@toshkent_uybot"
 
-# ADMIN_IDS ham .env dan olinadi
 ADMIN_IDS_STR = os.getenv('ADMIN_IDS', '')
 ADMIN_IDS = [int(id.strip()) for id in ADMIN_IDS_STR.split(',') if id.strip()]
 
-# VILOYATLAR
 REGIONS = {
     "tashkent_city": "🏙 Toshkent shahri",
     "tashkent_region": "🏞 Toshkent viloyati",
@@ -30,7 +26,6 @@ REGIONS = {
     "karakalpakstan": "🏝 Qoraqalpog'iston Respublikasi"
 }
 
-# TUMANLAR
 DISTRICTS = {
     "tashkent_city": [
         "Bektemir tumani", "Chilonzor tumani", "Hamza tumani", "Mirobod tumani",
@@ -116,7 +111,6 @@ DISTRICTS = {
     ]
 }
 
-# KATEGORIYALAR
 CATEGORIES = {
     "rent": "🏠 Ijaraga beriladigan xonadonlar",
     "sale": "💰 Sotiladigan uylar",
