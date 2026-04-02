@@ -45,7 +45,6 @@ def normalize_text(text):
     """Matnni normallashtirish - probellarni tozalash"""
     if not text:
         return text
-    # Bir nechta probellarni bitta probelga aylantirish
     return ' '.join(text.strip().split())
 
 async def add_listing(**kwargs):
@@ -53,7 +52,6 @@ async def add_listing(**kwargs):
     conn = await asyncpg.connect(DATABASE_URL)
     
     try:
-        # Tuman nomini normallashtirish
         district = normalize_text(kwargs['district'])
         title = normalize_text(kwargs['title'])
         description = normalize_text(kwargs['description'])
@@ -98,7 +96,6 @@ async def add_listing(**kwargs):
         raise e
 
 async def get_all_listings_raw():
-    """Barcha e'lonlarni statusdan qat'iy nazar olish (debug uchun)"""
     DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
@@ -121,42 +118,15 @@ async def get_all_listings(district, category):
     DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
-    # Normallashtirish
     district_norm = normalize_text(district)
     
-    # DEBUG: Bazadagi barcha tumanlarni ko'rish
-    all_districts = await conn.fetch("SELECT DISTINCT district, status FROM listings WHERE category = $1", category)
-    print(f"DEBUG: Bazadagi '{category}' kategoriyasidagi tumanlar:")
-    for d in all_districts:
-        print(f"  - '{d['district']}' (status: {d['status']})")
-    
-    print(f"DEBUG: Qidirilayotgan district: '{district_norm}'")
-    
-    # Katta-kichik harf sezgirligini yo'qotish va normallashtirish
     rows = await conn.fetch("""
     SELECT * FROM listings
-    WHERE LOWER(REPLACE(district, '  ', ' ')) = LOWER($1) 
-    AND category = $2 
-    AND status = 'active'
+    WHERE LOWER(district) = LOWER($1) AND category = $2 AND status = 'active'
     ORDER BY id DESC
     """, district_norm, category)
     
     await conn.close()
-    
-    print(f"DEBUG: Qidiruv natijasi: {len(rows)} ta active e'lon")
-    
-    # Agar 0 ta bo'lsa, statusi active bo'lmaganlarini tekshirish
-    if len(rows) == 0:
-        conn2 = await asyncpg.connect(DATABASE_URL)
-        inactive = await conn2.fetch("""
-        SELECT id, status, district FROM listings
-        WHERE LOWER(REPLACE(district, '  ', ' ')) = LOWER($1) AND category = $2
-        """, district_norm, category)
-        await conn2.close()
-        if inactive:
-            print(f"DEBUG: {len(inactive)} ta e'lon bor lekin statusi active emas:")
-            for i in inactive:
-                print(f"  - ID: {i['id']}, status: {i['status']}, district: '{i['district']}'")
     
     result = []
     for row in rows:
@@ -181,7 +151,6 @@ async def delete_listing_by_id(listing_id):
     conn = await asyncpg.connect(DATABASE_URL)
     await conn.execute("DELETE FROM listings WHERE id = $1", listing_id)
     await conn.close()
-    print(f"✅ E'lon o'chirildi: ID={listing_id}")
 
 async def get_listing_by_id(listing_id):
     DATABASE_URL = os.getenv('DATABASE_URL')
@@ -230,4 +199,3 @@ async def update_listing_status(listing_id, status):
     conn = await asyncpg.connect(DATABASE_URL)
     await conn.execute("UPDATE listings SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", status, listing_id)
     await conn.close()
-    print(f"✅ E'lon holati yangilandi: ID={listing_id}, status={status}")
