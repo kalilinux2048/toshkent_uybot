@@ -2,7 +2,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import REGIONS, DISTRICTS, CATEGORIES
 import base64
 
-# VILOYATLAR TUGMALARI
 def get_regions_keyboard():
     kb = InlineKeyboardBuilder()
     for key, name in REGIONS.items():
@@ -10,19 +9,16 @@ def get_regions_keyboard():
     kb.adjust(2)
     return kb.as_markup()
 
-# TUMANLAR TUGMALARI
 def get_districts_keyboard(region_key):
     kb = InlineKeyboardBuilder()
     if region_key in DISTRICTS:
         for district in DISTRICTS[region_key]:
-            # Tuman nomini base64 encode qilish (_ va bo'shliq muammosini hal qiladi)
             district_bytes = district.encode('utf-8')
-            district_encoded = base64.b64encode(district_bytes).decode('utf-8')
+            district_encoded = base64.urlsafe_b64encode(district_bytes).decode('utf-8')
             kb.button(text=district, callback_data=f"district_{region_key}_{district_encoded}")
     kb.adjust(2)
     return kb.as_markup()
 
-# KATEGORIYA TUGMALARI
 def get_categories_keyboard(region_key, district_encoded):
     kb = InlineKeyboardBuilder()
     for key, val in CATEGORIES.items():
@@ -30,7 +26,6 @@ def get_categories_keyboard(region_key, district_encoded):
     kb.adjust(1)
     return kb.as_markup()
 
-# E'LONLARNI SAHIFALASH
 def get_listing_navigation_keyboard(region_key, district_encoded, cat_key, current_index, total_count):
     kb = InlineKeyboardBuilder()
     
