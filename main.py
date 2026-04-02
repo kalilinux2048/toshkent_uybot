@@ -113,7 +113,8 @@ async def navigate_listings(call: types.CallbackQuery):
         new_index = int(parts[-1])
         district_parts = parts[2:-2]
         district_callback = "_".join(district_parts)
-        district = district_callback.replace("_", " ")
+        import urllib.parse
+district = urllib.parse.unquote(district_callback)
         cat_name = CATEGORIES[cat_key]
 
         listings = await get_all_listings(district, cat_name)
