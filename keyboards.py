@@ -14,7 +14,6 @@ def get_districts_keyboard(region_key):
     kb = InlineKeyboardBuilder()
     if region_key in DISTRICTS:
         for district in DISTRICTS[region_key]:
-            # Tumanni _ bilan bog'lab yuboramiz
             district_callback = district.replace(" ", "_")
             kb.button(text=district, callback_data=f"district_{region_key}_{district_callback}")
     kb.adjust(2)
