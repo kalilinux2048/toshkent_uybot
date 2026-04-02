@@ -43,7 +43,8 @@ def decode_district(encoded):
     try:
         decoded_bytes = base64.urlsafe_b64decode(encoded)
         return decoded_bytes.decode('utf-8')
-    except:
+    except Exception as e:
+        print(f"Decode error: {e}")
         return encoded
 
 @dp.message(Command("start"))
@@ -85,12 +86,18 @@ async def select_district(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        parts = data.split("_", 2)
-        if len(parts) < 3:
+        # district_{region_key}_{encoded}
+        # region_key ichida _ bo'lishi mumkin (tashkent_city)
+        # Shuning uchun birinchi _ dan keyin region_key ni olish
+        first_underscore = data.find('_')
+        second_underscore = data.find('_', first_underscore + 1)
+        
+        if first_underscore == -1 or second_underscore == -1:
             raise ValueError("Invalid format")
         
-        region_key = parts[1]
-        district_encoded = parts[2]
+        region_key = data[first_underscore + 1:second_underscore]
+        district_encoded = data[second_underscore + 1:]
+        
         district = decode_district(district_encoded)
         district = normalize_text(district)
         
@@ -109,25 +116,38 @@ async def select_category(call: types.CallbackQuery):
         data = call.data
         print(f"DEBUG: Full callback: {data}")
         
-        last_underscore = data.rfind('_')
+        # cat_{region_key}_{encoded}_{cat_key}
+        # region_key ichida _ bo'lishi mumkin (tashkent_city)
+        # Shuning uchun cat_ dan keyingi qismni to'g'ri ajratish
+        
+        # cat_ ni olib tashlaymiz
+        without_cat = data[4:]
+        
+        # Oxirgi _ dan keyin cat_key
+        last_underscore = without_cat.rfind('_')
         if last_underscore == -1:
             raise ValueError("Invalid format")
         
-        cat_key = data[last_underscore + 1:]
-        prefix = data[:last_underscore]
+        cat_key = without_cat[last_underscore + 1:]
+        rest = without_cat[:last_underscore]
         
-        prefix_parts = prefix.split("_", 2)
-        if len(prefix_parts) < 3:
+        # rest = region_key_encoded
+        # Birinchi _ dan keyin region_key, qolgani encoded
+        first_underscore = rest.find('_')
+        if first_underscore == -1:
             raise ValueError("Invalid format")
         
-        region_key = prefix_parts[1]
-        district_encoded = prefix_parts[2]
+        region_key = rest[:first_underscore]
+        district_encoded = rest[first_underscore + 1:]
         
         district = decode_district(district_encoded)
         district = normalize_text(district)
         cat_name = CATEGORIES[cat_key]
         
-        print(f"DEBUG: district='{district}', cat_name='{cat_name}'")
+        print(f"DEBUG: region_key='{region_key}'")
+        print(f"DEBUG: district_encoded='{district_encoded}'")
+        print(f"DEBUG: district='{district}'")
+        print(f"DEBUG: cat_name='{cat_name}'")
         
         listings = await get_all_listings(district, cat_name)
         total_count = len(listings)
@@ -157,26 +177,29 @@ async def navigate_listings(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        last_underscore = data.rfind('_')
+        # nav_{region_key}_{encoded}_{cat_key}_{index}
+        without_nav = data[4:]
+        
+        last_underscore = without_nav.rfind('_')
         if last_underscore == -1:
             raise ValueError("Invalid format")
         
-        index_str = data[last_underscore + 1:]
-        prefix = data[:last_underscore]
+        index_str = without_nav[last_underscore + 1:]
+        rest = without_nav[:last_underscore]
         
-        second_last_underscore = prefix.rfind('_')
+        second_last_underscore = rest.rfind('_')
         if second_last_underscore == -1:
             raise ValueError("Invalid format")
         
-        cat_key = prefix[second_last_underscore + 1:]
-        nav_prefix = prefix[:second_last_underscore]
+        cat_key = rest[second_last_underscore + 1:]
+        rest2 = rest[:second_last_underscore]
         
-        nav_parts = nav_prefix.split("_", 2)
-        if len(nav_parts) < 3:
+        first_underscore = rest2.find('_')
+        if first_underscore == -1:
             raise ValueError("Invalid format")
         
-        region_key = nav_parts[1]
-        district_encoded = nav_parts[2]
+        region_key = rest2[:first_underscore]
+        district_encoded = rest2[first_underscore + 1:]
         new_index = int(index_str)
         
         district = decode_district(district_encoded)
