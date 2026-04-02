@@ -107,6 +107,8 @@ async def select_category(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
+        print(f"DEBUG: Full callback: {data}")
+        
         last_underscore = data.rfind('_')
         if last_underscore == -1:
             raise ValueError("Invalid format")
@@ -125,8 +127,12 @@ async def select_category(call: types.CallbackQuery):
         district = normalize_text(district)
         cat_name = CATEGORIES[cat_key]
         
+        print(f"DEBUG: district='{district}', cat_name='{cat_name}'")
+        
         listings = await get_all_listings(district, cat_name)
         total_count = len(listings)
+        
+        print(f"DEBUG: Found {total_count} listings")
 
         if total_count == 0:
             await call.message.answer(f"❌ {district} tumanida {cat_name} bo'yicha e'lon topilmadi")
@@ -137,7 +143,9 @@ async def select_category(call: types.CallbackQuery):
         )
     except Exception as e:
         print(f"❌ Xatolik: {e}")
-        await call.message.answer(f"❌ Xatolik yuz berdi")
+        import traceback
+        traceback.print_exc()
+        await call.message.answer(f"❌ Xatolik yuz berdi: {str(e)[:100]}")
 
 @dp.callback_query(F.data == "back_to_regions")
 async def back_to_regions(call: types.CallbackQuery):
