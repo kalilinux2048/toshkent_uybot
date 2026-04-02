@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InputMediaPhoto
 
 from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS, DISTRICTS
-from database import init_db, get_all_listings, increment_views, get_listing_by_id, delete_listing_by_id, update_listing_status
+from database import init_db, get_all_listings, increment_views, get_listing_by_id, delete_listing_by_id, update_listing_status, get_all_listings_raw
 from keyboards import (
     get_regions_keyboard,
     get_districts_keyboard,
@@ -33,6 +33,12 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(admin_router)
 
+def normalize_text(text):
+    """Matnni normallashtirish"""
+    if not text:
+        return text
+    return ' '.join(text.strip().split())
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
@@ -40,6 +46,37 @@ async def start(message: types.Message):
         "🏘 Uy va xonadonlar qidirish uchun viloyatni tanlang:",
         reply_markup=get_regions_keyboard()
     )
+
+@dp.message(Command("test"))
+async def test_command(message: types.Message):
+    """Test komandasi - bazadagi ma'lumotlarni tekshirish"""
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("🚫 Ruxsat yo'q!")
+        return
+    
+    # 1. Bazadagi barcha e'lonlarni ko'rsatish
+    all_listings = await get_all_listings_raw()
+    text = "📋 Bazadagi so'nggi 30 e'lon:\n\n"
+    for l in all_listings:
+        text += f"ID: {l['id']}, District: '{l['district']}', Category: {l['category'][:20]}, Status: {l['status']}\n"
+    
+    # 2. Toshkent shahri tumanlari uchun test
+    test_districts = ["Bektemir tumani", "Chilonzor tumani", "Mirzo Ulug'bek tumani", "Yunusobod tumani"]
+    text += "\n🔍 Qidiruv testi:\n"
+    for td in test_districts:
+        for cat_key, cat_name in CATEGORIES.items():
+            count = len(await get_all_listings(td, cat_name))
+            if count > 0:
+                text += f"✅ {td} / {cat_name[:20]}: {count} ta\n"
+    
+    text += "\n💡 Agar hech nima ko'rinmasa, yangi e'lon qo'shib ko'ring."
+    
+    # Xabarni bo'lib yuborish (agar uzun bo'lsa)
+    if len(text) > 4000:
+        for i in range(0, len(text), 4000):
+            await message.answer(text[i:i+4000])
+    else:
+        await message.answer(text)
 
 @dp.callback_query(F.data.startswith("region_"))
 async def select_region(call: types.CallbackQuery):
@@ -61,8 +98,7 @@ async def select_district(call: types.CallbackQuery):
         district_parts = parts[2:]
         district_callback = "_".join(district_parts)
         district = district_callback.replace("_", " ")
-        # Bo'shliqlarni tozalash
-        district = ' '.join(district.split())
+        district = normalize_text(district)
         
         await call.message.answer(
             f"✅ {district} tanlandi\n\n📂 Kategoriya tanlang:",
@@ -78,18 +114,26 @@ async def select_category(call: types.CallbackQuery):
     try:
         data = call.data
         parts = data.split("_")
+        
+        # DEBUG: Barcha qismlarni chiqarish
+        print(f"DEBUG: Full callback data: {data}")
+        print(f"DEBUG: Parts: {parts}")
+        
         region_key = parts[1]
         cat_key = parts[-1]
+        
+        # district_parts ni to'g'ri aniqlash (2-indexdan oxirgidan oldingigacha)
         district_parts = parts[2:-1]
         district_callback = "_".join(district_parts)
         district = district_callback.replace("_", " ")
-        # Bo'shliqlarni tozalash
-        district = ' '.join(district.split())
+        district = normalize_text(district)
+        
         cat_name = CATEGORIES[cat_key]
 
-        # DEBUG: Qanday qiymatlar kelayotganini ko'rish
-        print(f"DEBUG: Qidiruv - district = '{district}'")
-        print(f"DEBUG: Qidiruv - cat_name = '{cat_name}'")
+        print(f"DEBUG: region_key = '{region_key}'")
+        print(f"DEBUG: cat_key = '{cat_key}'")
+        print(f"DEBUG: district = '{district}'")
+        print(f"DEBUG: cat_name = '{cat_name}'")
         
         listings = await get_all_listings(district, cat_name)
         
@@ -98,7 +142,7 @@ async def select_category(call: types.CallbackQuery):
         total_count = len(listings)
 
         if total_count == 0:
-            await call.message.answer(f"❌ {district} tumanida {cat_name} bo'yicha e'lon topilmadi")
+            await call.message.answer(f"❌ {district} tumanida {cat_name} bo'yicha e'lon topilmadi\n\n💡 Yangi e'lon qo'shish uchun /admin buyrug'idan foydalaning.")
             return
 
         await show_listing(
@@ -106,7 +150,9 @@ async def select_category(call: types.CallbackQuery):
         )
     except Exception as e:
         print(f"❌ Xatolik: {e}")
-        await call.message.answer("❌ Xatolik yuz berdi")
+        import traceback
+        traceback.print_exc()
+        await call.message.answer(f"❌ Xatolik yuz berdi: {str(e)[:100]}")
 
 @dp.callback_query(F.data == "back_to_regions")
 async def back_to_regions(call: types.CallbackQuery):
@@ -125,7 +171,7 @@ async def navigate_listings(call: types.CallbackQuery):
         district_parts = parts[2:-2]
         district_callback = "_".join(district_parts)
         district = district_callback.replace("_", " ")
-        district = ' '.join(district.split())
+        district = normalize_text(district)
         cat_name = CATEGORIES[cat_key]
 
         listings = await get_all_listings(district, cat_name)
@@ -302,6 +348,7 @@ async def admin_quick_rented(callback: types.CallbackQuery):
 async def main():
     await init_db()
     print("✅ Bot ishga tushdi!")
+    print("📝 Admin komandalari: /admin, /test")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
