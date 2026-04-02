@@ -1,6 +1,6 @@
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import REGIONS, DISTRICTS, CATEGORIES
-import urllib.parse
+import base64
 
 # VILOYATLAR TUGMALARI
 def get_regions_keyboard():
@@ -15,8 +15,9 @@ def get_districts_keyboard(region_key):
     kb = InlineKeyboardBuilder()
     if region_key in DISTRICTS:
         for district in DISTRICTS[region_key]:
-            # Tuman nomini URL encode qilish
-            district_encoded = urllib.parse.quote(district, safe='')
+            # Tuman nomini base64 encode qilish (_ va bo'shliq muammosini hal qiladi)
+            district_bytes = district.encode('utf-8')
+            district_encoded = base64.b64encode(district_bytes).decode('utf-8')
             kb.button(text=district, callback_data=f"district_{region_key}_{district_encoded}")
     kb.adjust(2)
     return kb.as_markup()
