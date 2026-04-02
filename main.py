@@ -7,7 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InputMediaPhoto
 
-from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS, DISTRICTS
+from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS
 from database import init_db, get_all_listings, increment_views, get_listing_by_id, delete_listing_by_id, update_listing_status, get_all_listings_raw
 from keyboards import (
     get_regions_keyboard,
@@ -40,9 +40,8 @@ def normalize_text(text):
     return ' '.join(text.strip().split())
 
 def decode_district(encoded):
-    """Base64 dan tuman nomini dekod qilish"""
     try:
-        decoded_bytes = base64.b64decode(encoded)
+        decoded_bytes = base64.urlsafe_b64decode(encoded)
         return decoded_bytes.decode('utf-8')
     except:
         return encoded
@@ -66,14 +65,6 @@ async def test_command(message: types.Message):
     for l in all_listings:
         text += f"ID: {l['id']}, District: '{l['district']}', Category: {l['category'][:20]}, Status: {l['status']}\n"
     
-    test_districts = ["Bektemir tumani", "Chilonzor tumani", "Mirzo Ulug'bek tumani", "Yunusobod tumani"]
-    text += "\n🔍 Qidiruv testi:\n"
-    for td in test_districts:
-        for cat_key, cat_name in CATEGORIES.items():
-            count = len(await get_all_listings(td, cat_name))
-            if count > 0:
-                text += f"✅ {td} / {cat_name[:20]}: {count} ta\n"
-    
     if len(text) > 4000:
         for i in range(0, len(text), 4000):
             await message.answer(text[i:i+4000])
@@ -95,7 +86,6 @@ async def select_district(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        # district_region_key_encoded
         parts = data.split("_", 2)
         if len(parts) < 3:
             raise ValueError("Invalid format")
@@ -118,8 +108,6 @@ async def select_category(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        # cat_region_key_district_encoded_cat_key
-        # Barcha _ larni hisobga olib, oxirgi qism cat_key
         last_underscore = data.rfind('_')
         if last_underscore == -1:
             raise ValueError("Invalid format")
@@ -127,7 +115,6 @@ async def select_category(call: types.CallbackQuery):
         cat_key = data[last_underscore + 1:]
         prefix = data[:last_underscore]
         
-        # prefix = cat_region_key_district_encoded
         prefix_parts = prefix.split("_", 2)
         if len(prefix_parts) < 3:
             raise ValueError("Invalid format")
@@ -137,20 +124,9 @@ async def select_category(call: types.CallbackQuery):
         
         district = decode_district(district_encoded)
         district = normalize_text(district)
-        
-        if cat_key not in CATEGORIES:
-            await call.message.answer(f"❌ Xato: '{cat_key}' kategoriyasi topilmadi")
-            return
-        
         cat_name = CATEGORIES[cat_key]
-
-        print(f"DEBUG: region_key = '{region_key}'")
-        print(f"DEBUG: district = '{district}'")
-        print(f"DEBUG: cat_key = '{cat_key}'")
-        print(f"DEBUG: cat_name = '{cat_name}'")
         
         listings = await get_all_listings(district, cat_name)
-        
         total_count = len(listings)
 
         if total_count == 0:
@@ -162,9 +138,7 @@ async def select_category(call: types.CallbackQuery):
         )
     except Exception as e:
         print(f"❌ Xatolik: {e}")
-        import traceback
-        traceback.print_exc()
-        await call.message.answer(f"❌ Xatolik yuz berdi: {str(e)[:100]}")
+        await call.message.answer(f"❌ Xatolik yuz berdi")
 
 @dp.callback_query(F.data == "back_to_regions")
 async def back_to_regions(call: types.CallbackQuery):
@@ -176,8 +150,6 @@ async def navigate_listings(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        # nav_region_key_district_encoded_cat_key_index
-        # Oxirgi _ dan keyin index, undan oldingi qism
         last_underscore = data.rfind('_')
         if last_underscore == -1:
             raise ValueError("Invalid format")
@@ -185,8 +157,6 @@ async def navigate_listings(call: types.CallbackQuery):
         index_str = data[last_underscore + 1:]
         prefix = data[:last_underscore]
         
-        # prefix = nav_region_key_district_encoded_cat_key
-        # Oxirgi _ dan keyin cat_key
         second_last_underscore = prefix.rfind('_')
         if second_last_underscore == -1:
             raise ValueError("Invalid format")
@@ -194,7 +164,6 @@ async def navigate_listings(call: types.CallbackQuery):
         cat_key = prefix[second_last_underscore + 1:]
         nav_prefix = prefix[:second_last_underscore]
         
-        # nav_prefix = nav_region_key_district_encoded
         nav_parts = nav_prefix.split("_", 2)
         if len(nav_parts) < 3:
             raise ValueError("Invalid format")
@@ -245,14 +214,12 @@ async def show_listing(message, listing, region_key, district_encoded, cat_key, 
         admin_kb.adjust(1)
         
         combined_kb = InlineKeyboardBuilder()
-        if nav_kb and hasattr(nav_kb, 'inline_keyboard'):
-            for row in nav_kb.inline_keyboard:
-                for button in row:
-                    combined_kb.button(text=button.text, callback_data=button.callback_data)
-        if admin_kb and hasattr(admin_kb, 'inline_keyboard'):
-            for row in admin_kb.inline_keyboard:
-                for button in row:
-                    combined_kb.button(text=button.text, callback_data=button.callback_data)
+        for row in nav_kb.inline_keyboard:
+            for button in row:
+                combined_kb.button(text=button.text, callback_data=button.callback_data)
+        for row in admin_kb.inline_keyboard:
+            for button in row:
+                combined_kb.button(text=button.text, callback_data=button.callback_data)
         combined_kb.adjust(1)
         final_kb = combined_kb.as_markup()
     else:
@@ -266,19 +233,12 @@ async def show_listing(message, listing, region_key, district_encoded, cat_key, 
                     media.append(InputMediaPhoto(media=photo_id, caption=text))
                 else:
                     media.append(InputMediaPhoto(media=photo_id))
-            
             await message.answer_media_group(media=media)
             await message.answer("📌 Amallar:", reply_markup=final_kb)
-            
         elif listing.get('image_url'):
-            await message.answer_photo(
-                listing['image_url'], 
-                caption=text, 
-                reply_markup=final_kb
-            )
+            await message.answer_photo(listing['image_url'], caption=text, reply_markup=final_kb)
         else:
             await message.answer(text, reply_markup=final_kb)
-            
     except Exception as e:
         print(f"❌ Xatolik: {e}")
         await message.answer(text, reply_markup=final_kb)
@@ -323,16 +283,13 @@ async def view_listing_by_id(message: types.Message):
                     media.append(InputMediaPhoto(media=photo_id, caption=text))
                 else:
                     media.append(InputMediaPhoto(media=photo_id))
-            
             await message.answer_media_group(media=media)
             if kb:
                 await message.answer("📌 Amallar:", reply_markup=kb)
-                
         elif listing.get('image_url'):
             await message.answer_photo(listing['image_url'], caption=text, reply_markup=kb)
         else:
             await message.answer(text, reply_markup=kb)
-            
     except (IndexError, ValueError):
         await message.answer("❌ Noto'g'ri format. To'g'ri format: /view 123")
     except Exception as e:
@@ -358,10 +315,6 @@ async def admin_quick_sold(callback: types.CallbackQuery):
     listing_id = int(callback.data.replace("admin_sold_", ""))
     await update_listing_status(listing_id, 'sold')
     await callback.answer("✅ Sotilgan deb belgilandi!")
-    
-    if callback.message.caption:
-        new_text = callback.message.caption + "\n\n✅ HOLAT: SOTILGAN"
-        await callback.message.edit_caption(caption=new_text)
 
 @dp.callback_query(F.data.startswith("admin_rented_"))
 async def admin_quick_rented(callback: types.CallbackQuery):
@@ -372,15 +325,10 @@ async def admin_quick_rented(callback: types.CallbackQuery):
     listing_id = int(callback.data.replace("admin_rented_", ""))
     await update_listing_status(listing_id, 'rented')
     await callback.answer("✅ Ijaraga berilgan deb belgilandi!")
-    
-    if callback.message.caption:
-        new_text = callback.message.caption + "\n\n✅ HOLAT: IJARAGA BERILGAN"
-        await callback.message.edit_caption(caption=new_text)
 
 async def main():
     await init_db()
     print("✅ Bot ishga tushdi!")
-    print("📝 Admin komandalari: /admin, /test")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
