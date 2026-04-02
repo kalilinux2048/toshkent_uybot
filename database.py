@@ -41,13 +41,25 @@ async def init_db():
         print(f"❌ PostgreSQL xatolik: {e}")
         return False
 
+def normalize_text(text):
+    """Matnni normallashtirish - probellarni tozalash"""
+    if not text:
+        return text
+    # Bir nechta probellarni bitta probelga aylantirish
+    return ' '.join(text.strip().split())
+
 async def add_listing(**kwargs):
     DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
     try:
         # Tuman nomini normallashtirish
-        district = kwargs['district'].strip()
+        district = normalize_text(kwargs['district'])
+        title = normalize_text(kwargs['title'])
+        description = normalize_text(kwargs['description'])
+        phone = normalize_text(kwargs['phone'])
+        price = normalize_text(kwargs['price'])
+        rooms = normalize_text(kwargs['rooms'])
         
         if 'media_group' in kwargs and kwargs['media_group']:
             media_group_json = json.dumps(kwargs['media_group'])
@@ -65,13 +77,13 @@ async def add_listing(**kwargs):
         RETURNING id
         """, 
             kwargs.get('region', 'tashkent_city'),
-            district,  # Normallashtirilgan tuman nomi
+            district,
             kwargs['category'],
-            kwargs['title'],
-            kwargs['price'],
-            kwargs['rooms'],
-            kwargs['description'],
-            kwargs['phone'],
+            title,
+            price,
+            rooms,
+            description,
+            phone,
             image_url,
             media_group_json
         )
@@ -85,24 +97,66 @@ async def add_listing(**kwargs):
         print(f"❌ add_listing xatolik: {e}")
         raise e
 
+async def get_all_listings_raw():
+    """Barcha e'lonlarni statusdan qat'iy nazar olish (debug uchun)"""
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    rows = await conn.fetch("""
+    SELECT id, district, category, status, title, region 
+    FROM listings 
+    ORDER BY id DESC
+    LIMIT 30
+    """)
+    
+    await conn.close()
+    
+    result = []
+    for row in rows:
+        result.append(dict(row))
+    
+    return result
+
 async def get_all_listings(district, category):
     DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
-    # DEBUG: Bazadagi barcha tumanlarni ko'rish
-    all_districts = await conn.fetch("SELECT DISTINCT district FROM listings WHERE status='active'")
-    print(f"DEBUG: Bazadagi faol tumanlar: {[d['district'] for d in all_districts]}")
+    # Normallashtirish
+    district_norm = normalize_text(district)
     
-    # Katta-kichik harf sezgirligini yo'qotish uchun LOWER() ishlatamiz
+    # DEBUG: Bazadagi barcha tumanlarni ko'rish
+    all_districts = await conn.fetch("SELECT DISTINCT district, status FROM listings WHERE category = $1", category)
+    print(f"DEBUG: Bazadagi '{category}' kategoriyasidagi tumanlar:")
+    for d in all_districts:
+        print(f"  - '{d['district']}' (status: {d['status']})")
+    
+    print(f"DEBUG: Qidirilayotgan district: '{district_norm}'")
+    
+    # Katta-kichik harf sezgirligini yo'qotish va normallashtirish
     rows = await conn.fetch("""
     SELECT * FROM listings
-    WHERE LOWER(district) = LOWER($1) AND category = $2 AND status = 'active'
+    WHERE LOWER(REPLACE(district, '  ', ' ')) = LOWER($1) 
+    AND category = $2 
+    AND status = 'active'
     ORDER BY id DESC
-    """, district.strip(), category)
+    """, district_norm, category)
     
     await conn.close()
     
-    print(f"DEBUG: Qidiruv: district='{district}', category='{category}' -> {len(rows)} ta topildi")
+    print(f"DEBUG: Qidiruv natijasi: {len(rows)} ta active e'lon")
+    
+    # Agar 0 ta bo'lsa, statusi active bo'lmaganlarini tekshirish
+    if len(rows) == 0:
+        conn2 = await asyncpg.connect(DATABASE_URL)
+        inactive = await conn2.fetch("""
+        SELECT id, status, district FROM listings
+        WHERE LOWER(REPLACE(district, '  ', ' ')) = LOWER($1) AND category = $2
+        """, district_norm, category)
+        await conn2.close()
+        if inactive:
+            print(f"DEBUG: {len(inactive)} ta e'lon bor lekin statusi active emas:")
+            for i in inactive:
+                print(f"  - ID: {i['id']}, status: {i['status']}, district: '{i['district']}'")
     
     result = []
     for row in rows:
