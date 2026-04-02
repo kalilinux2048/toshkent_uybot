@@ -1,109 +1,179 @@
-import sqlite3
+import asyncpg
+import json
+import os
+from datetime import datetime, timedelta
 
-DB_NAME = "database.db"
+async def init_db():
+    try:
+        DATABASE_URL = os.getenv('DATABASE_URL')
+        
+        if not DATABASE_URL:
+            print("❌ DATABASE_URL topilmadi! PostgreSQL yaratganmisiz?")
+            return False
+        
+        conn = await asyncpg.connect(DATABASE_URL)
+        
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS listings (
+            id SERIAL PRIMARY KEY,
+            region TEXT,
+            district TEXT,
+            category TEXT,
+            title TEXT,
+            price TEXT,
+            rooms TEXT,
+            description TEXT,
+            phone TEXT,
+            image_url TEXT,
+            media_group TEXT,
+            views_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        await conn.close()
+        print("✅ PostgreSQL bazasi tayyor")
+        return True
+        
+    except Exception as e:
+        print(f"❌ PostgreSQL xatolik: {e}")
+        return False
 
-def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS listings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        region TEXT,
-        district TEXT,
-        category TEXT,
-        title TEXT,
-        price TEXT,
-        rooms TEXT,
-        description TEXT,
-        phone TEXT,
-        image_url TEXT,
-        media_group TEXT,
-        views_count INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'active'
-    )
-    """)
-    conn.commit()
-    conn.close()
+async def add_listing(**kwargs):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    try:
+        # Tuman nomini normallashtirish
+        district = kwargs['district'].strip()
+        
+        if 'media_group' in kwargs and kwargs['media_group']:
+            media_group_json = json.dumps(kwargs['media_group'])
+            image_url = kwargs['media_group'][0]
+        else:
+            media_group_json = None
+            image_url = kwargs.get('image_url')
+        
+        result = await conn.fetchrow("""
+        INSERT INTO listings (
+            region, district, category, title, price, rooms, 
+            description, phone, image_url, media_group, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active')
+        RETURNING id
+        """, 
+            kwargs.get('region', 'tashkent_city'),
+            district,  # Normallashtirilgan tuman nomi
+            kwargs['category'],
+            kwargs['title'],
+            kwargs['price'],
+            kwargs['rooms'],
+            kwargs['description'],
+            kwargs['phone'],
+            image_url,
+            media_group_json
+        )
+        
+        await conn.close()
+        print(f"✅ E'lon qo'shildi: ID={result['id']}, District='{district}'")
+        return result['id']
+        
+    except Exception as e:
+        await conn.close()
+        print(f"❌ add_listing xatolik: {e}")
+        raise e
 
-def add_listing(region, district, category, title, price, rooms, description, phone, image_url=None, media_group=None):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    media_str = ",".join(media_group) if media_group else ""
-    cursor.execute("""
-    INSERT INTO listings (region, district, category, title, price, rooms, description, phone, image_url, media_group)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (region, district, category, title, price, rooms, description, phone, image_url, media_str))
-    conn.commit()
-    conn.close()
-
-def get_all_listings(district="", category=""):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-    SELECT * FROM listings WHERE district LIKE ? AND category LIKE ? AND status='active'
-    """, (f"%{district}%", f"%{category}%"))
-    rows = cursor.fetchall()
-    conn.close()
+async def get_all_listings(district, category):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    # DEBUG: Bazadagi barcha tumanlarni ko'rish
+    all_districts = await conn.fetch("SELECT DISTINCT district FROM listings WHERE status='active'")
+    print(f"DEBUG: Bazadagi faol tumanlar: {[d['district'] for d in all_districts]}")
+    
+    # Katta-kichik harf sezgirligini yo'qotish uchun LOWER() ishlatamiz
+    rows = await conn.fetch("""
+    SELECT * FROM listings
+    WHERE LOWER(district) = LOWER($1) AND category = $2 AND status = 'active'
+    ORDER BY id DESC
+    """, district.strip(), category)
+    
+    await conn.close()
+    
+    print(f"DEBUG: Qidiruv: district='{district}', category='{category}' -> {len(rows)} ta topildi")
+    
     result = []
     for row in rows:
-        result.append({
-            "id": row[0],
-            "region": row[1],
-            "district": row[2],
-            "category": row[3],
-            "title": row[4],
-            "price": row[5],
-            "rooms": row[6],
-            "description": row[7],
-            "phone": row[8],
-            "image_url": row[9],
-            "media_group": row[10].split(",") if row[10] else [],
-            "views_count": row[11],
-            "status": row[12]
-        })
+        row_dict = dict(row)
+        if row_dict.get('media_group'):
+            try:
+                row_dict['media_group'] = json.loads(row_dict['media_group'])
+            except:
+                row_dict['media_group'] = None
+        result.append(row_dict)
+    
     return result
 
-def get_listing_by_id(listing_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM listings WHERE id=?", (listing_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return None
+async def increment_views(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("UPDATE listings SET views_count = views_count + 1 WHERE id = $1", listing_id)
+    await conn.close()
+
+async def delete_listing_by_id(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("DELETE FROM listings WHERE id = $1", listing_id)
+    await conn.close()
+    print(f"✅ E'lon o'chirildi: ID={listing_id}")
+
+async def get_listing_by_id(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    row = await conn.fetchrow("SELECT * FROM listings WHERE id = $1", listing_id)
+    await conn.close()
+    
+    if row:
+        row_dict = dict(row)
+        if row_dict.get('media_group'):
+            try:
+                row_dict['media_group'] = json.loads(row_dict['media_group'])
+            except:
+                row_dict['media_group'] = None
+        return row_dict
+    return None
+
+async def get_admin_statistics():
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    total = await conn.fetchval("SELECT COUNT(*) FROM listings")
+    active = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE status='active'")
+    sold = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE status='sold'")
+    rented = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE status='rented'")
+    total_views = await conn.fetchval("SELECT COALESCE(SUM(views_count), 0) FROM listings")
+    
+    categories = await conn.fetch("SELECT category, COUNT(*) FROM listings WHERE status='active' GROUP BY category")
+    regions = await conn.fetch("SELECT region, COUNT(*) FROM listings WHERE status='active' GROUP BY region ORDER BY count DESC LIMIT 5")
+    districts = await conn.fetch("SELECT district, COUNT(*) FROM listings WHERE status='active' GROUP BY district ORDER BY count DESC LIMIT 5")
+    
+    week_ago = datetime.now() - timedelta(days=7)
+    last_week = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE created_at > $1", week_ago)
+    top_listings = await conn.fetch("SELECT title, views_count FROM listings ORDER BY views_count DESC LIMIT 5")
+    
+    await conn.close()
+    
     return {
-        "id": row[0],
-        "region": row[1],
-        "district": row[2],
-        "category": row[3],
-        "title": row[4],
-        "price": row[5],
-        "rooms": row[6],
-        "description": row[7],
-        "phone": row[8],
-        "image_url": row[9],
-        "media_group": row[10].split(",") if row[10] else [],
-        "views_count": row[11],
-        "status": row[12]
+        'total': total, 'active': active, 'sold': sold, 'rented': rented,
+        'total_views': total_views, 'categories': categories, 'regions': regions,
+        'districts': districts, 'last_week': last_week, 'top_listings': top_listings
     }
 
-def update_listing_status(listing_id, status):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE listings SET status=? WHERE id=?", (status, listing_id))
-    conn.commit()
-    conn.close()
-
-def delete_listing_by_id(listing_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM listings WHERE id=?", (listing_id,))
-    conn.commit()
-    conn.close()
-
-def increment_views(listing_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE listings SET views_count = views_count + 1 WHERE id=?", (listing_id,))
-    conn.commit()
-    conn.close()
+async def update_listing_status(listing_id, status):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("UPDATE listings SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", status, listing_id)
+    await conn.close()
+    print(f"✅ E'lon holati yangilandi: ID={listing_id}, status={status}")
