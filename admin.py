@@ -101,8 +101,7 @@ async def delete_menu(callback: types.CallbackQuery):
     kb.button(text="🔙 Admin panel", callback_data="back_to_admin")
     kb.adjust(1)
     await callback.message.edit_text(
-        "❌ E'lonni o'chirish uchun e'lon ID sini yuboring.\n\n"
-        "Format: /delete 123",
+        "❌ E'lonni o'chirish uchun e'lon ID sini yuboring.\n\nFormat: /delete 123",
         reply_markup=kb.as_markup()
     )
 
@@ -125,12 +124,7 @@ async def delete_listing(message: types.Message):
         kb.adjust(1)
         
         await message.answer(
-            f"🔍 Topilgan e'lon:\n\n"
-            f"🏠 {listing['title']}\n"
-            f"📍 {listing['district']}\n"
-            f"💰 {listing['price']}\n"
-            f"📊 Holat: {listing['status']}\n\n"
-            f"Rostdan ham o'chirilsinmi?",
+            f"🔍 Topilgan e'lon:\n\n🏠 {listing['title']}\n📍 {listing['district']}\n💰 {listing['price']}\n📊 Holat: {listing['status']}\n\nRostdan ham o'chirilsinmi?",
             reply_markup=kb.as_markup()
         )
     except (IndexError, ValueError):
@@ -147,7 +141,7 @@ async def confirm_delete(callback: types.CallbackQuery):
     kb = InlineKeyboardBuilder()
     kb.button(text="🔙 Admin panel", callback_data="back_to_admin")
     kb.adjust(1)
-    await callback.message.edit_text(f"✅ {listing_id} ID li e'lon muvaffaqiyatli o'chirildi!")
+    await callback.message.edit_text(f"✅ {listing_id} ID li e'lon muvaffaqiyatli o'chirildi!", reply_markup=kb.as_markup())
 
 @admin_router.callback_query(F.data == "update_status_menu")
 async def update_status_menu(callback: types.CallbackQuery):
@@ -158,10 +152,8 @@ async def update_status_menu(callback: types.CallbackQuery):
     kb.button(text="🔙 Admin panel", callback_data="back_to_admin")
     kb.adjust(1)
     await callback.message.edit_text(
-        "✅ E'lon holatini yangilash uchun:\n"
-        "/sold 123 - Sotilgan\n"
-        "/rented 123 - Ijaraga berilgan\n"
-        "/active 123 - Qayta faollashtirish"
+        "✅ E'lon holatini yangilash uchun:\n/sold 123 - Sotilgan\n/rented 123 - Ijaraga berilgan\n/active 123 - Qayta faollashtirish",
+        reply_markup=kb.as_markup()
     )
 
 @admin_router.message(Command("sold"))
@@ -293,9 +285,7 @@ async def set_desc(message: types.Message, state: FSMContext):
 async def set_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=normalize_text(message.text))
     await message.answer(
-        "📸 **RASMLARNI YUBORING**\n\n"
-        "Rasm yuboring yoki tugatish uchun 'done' deb yozing.\n"
-        "Rasmsiz o'tkazish uchun 'skip' deb yozing."
+        "📸 **RASMLARNI YUBORING**\n\nRasm yuboring yoki tugatish uchun 'done' deb yozing.\nRasmsiz o'tkazish uchun 'skip' deb yozing."
     )
     await state.update_data(images=[])
     await state.set_state(AddListingStates.images)
