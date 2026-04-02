@@ -20,6 +20,12 @@ class AddListingStates(StatesGroup):
     phone = State()
     images = State()
 
+def normalize_text(text):
+    """Matnni normallashtirish"""
+    if not text:
+        return text
+    return ' '.join(text.strip().split())
+
 # ADMIN PANEL
 @admin_router.message(Command("admin"))
 async def admin_panel(message: types.Message):
@@ -278,8 +284,7 @@ async def add_select_region(callback: types.CallbackQuery, state: FSMContext):
 async def set_district(callback: types.CallbackQuery, state: FSMContext):
     district_callback = callback.data[2:]
     district = district_callback.replace("_", " ")
-    # Bo'shliqlarni tozalash
-    district = ' '.join(district.split())
+    district = normalize_text(district)
     await state.update_data(district=district)
     await callback.message.answer(f"✅ {district} tanlandi")
 
@@ -303,35 +308,35 @@ async def set_category(callback: types.CallbackQuery, state: FSMContext):
 # SARLAVHA
 @admin_router.message(AddListingStates.title)
 async def set_title(message: types.Message, state: FSMContext):
-    await state.update_data(title=message.text.strip())
+    await state.update_data(title=normalize_text(message.text))
     await message.answer("💰 Narx (so'mda):")
     await state.set_state(AddListingStates.price)
 
 # NARX
 @admin_router.message(AddListingStates.price)
 async def set_price(message: types.Message, state: FSMContext):
-    await state.update_data(price=message.text.strip())
+    await state.update_data(price=normalize_text(message.text))
     await message.answer("🛏 Xonalar soni:")
     await state.set_state(AddListingStates.rooms)
 
 # XONALAR SONI
 @admin_router.message(AddListingStates.rooms)
 async def set_rooms(message: types.Message, state: FSMContext):
-    await state.update_data(rooms=message.text.strip())
+    await state.update_data(rooms=normalize_text(message.text))
     await message.answer("📝 Tavsif yozing:")
     await state.set_state(AddListingStates.description)
 
 # TAVSIF
 @admin_router.message(AddListingStates.description)
 async def set_desc(message: types.Message, state: FSMContext):
-    await state.update_data(description=message.text.strip())
+    await state.update_data(description=normalize_text(message.text))
     await message.answer("📞 Telefon raqam:")
     await state.set_state(AddListingStates.phone)
 
 # TELEFON
 @admin_router.message(AddListingStates.phone)
 async def set_phone(message: types.Message, state: FSMContext):
-    await state.update_data(phone=message.text.strip())
+    await state.update_data(phone=normalize_text(message.text))
     await message.answer(
         "📸 **RASMLARNI YUBORING**\n\n"
         "Bir nechta rasm yuborishingiz mumkin.\n"
@@ -395,17 +400,21 @@ async def save_listing(message: types.Message, state: FSMContext):
         images = data.get('images', [])
         
         # DEBUG: Saqlanayotgan ma'lumotlar
-        print(f"DEBUG: Saving listing - District: '{data['district']}'")
+        print(f"DEBUG SAVE: Region: {data.get('region')}")
+        print(f"DEBUG SAVE: District: '{data['district']}'")
+        print(f"DEBUG SAVE: Category: {data['category']}")
         
         if images:
-            await add_listing(**data, media_group=images, image_url=images[0])
-            await message.answer(f"✅ E'lon muvaffaqiyatli qo'shildi! {len(images)} ta rasm bilan.")
+            listing_id = await add_listing(**data, media_group=images, image_url=images[0])
+            await message.answer(f"✅ E'lon muvaffaqiyatli qo'shildi! ID: {listing_id}, {len(images)} ta rasm bilan.")
         else:
-            await add_listing(**data, image_url=None)
-            await message.answer("✅ E'lon muvaffaqiyatli qo'shildi! (rasmsiz)")
+            listing_id = await add_listing(**data, image_url=None)
+            await message.answer(f"✅ E'lon muvaffaqiyatli qo'shildi! ID: {listing_id} (rasmsiz)")
         
         await state.clear()
     except Exception as e:
         print(f"❌ Xatolik: {e}")
+        import traceback
+        traceback.print_exc()
         await message.answer(f"❌ Xatolik: {e}")
         await state.clear()
