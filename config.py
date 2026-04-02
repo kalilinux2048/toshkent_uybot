@@ -116,9 +116,9 @@ DISTRICTS = {
     ]
 }
 
-# KATEGORIYALAR - 3 XIL (SUBSIDIYA QO'SHILDI)
+# KATEGORIYALAR
 CATEGORIES = {
     "rent": "🏠 Ijaraga beriladigan xonadonlar",
     "sale": "💰 Sotiladigan uylar",
-    "subsidy": "🏡 Subsidiyaga beriladigan uylar"  # YANGI QO'SHILDI
+    "subsidy": "🏡 Subsidiyaga beriladigan uylar"
 }
