@@ -49,8 +49,7 @@ def decode_district(encoded):
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
-        "🇺🇿 O'zbekiston Uy Bot\n\n"
-        "🏘 Uy va xonadonlar qidirish uchun viloyatni tanlang:",
+        "🇺🇿 O'zbekiston Uy Bot\n\n🏘 Uy va xonadonlar qidirish uchun viloyatni tanlang:",
         reply_markup=get_regions_keyboard()
     )
 
@@ -206,25 +205,6 @@ async def show_listing(message, listing, region_key, district_encoded, cat_key, 
     
     nav_kb = get_listing_navigation_keyboard(region_key, district_encoded, cat_key, current_index, total_count)
     
-    if message.chat.id in ADMIN_IDS:
-        admin_kb = InlineKeyboardBuilder()
-        admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
-        admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
-        admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
-        admin_kb.adjust(1)
-        
-        combined_kb = InlineKeyboardBuilder()
-        for row in nav_kb.inline_keyboard:
-            for button in row:
-                combined_kb.button(text=button.text, callback_data=button.callback_data)
-        for row in admin_kb.inline_keyboard:
-            for button in row:
-                combined_kb.button(text=button.text, callback_data=button.callback_data)
-        combined_kb.adjust(1)
-        final_kb = combined_kb.as_markup()
-    else:
-        final_kb = nav_kb
-    
     try:
         if listing.get('media_group') and len(listing['media_group']) > 1:
             media = []
@@ -234,14 +214,37 @@ async def show_listing(message, listing, region_key, district_encoded, cat_key, 
                 else:
                     media.append(InputMediaPhoto(media=photo_id))
             await message.answer_media_group(media=media)
-            await message.answer("📌 Amallar:", reply_markup=final_kb)
+            await message.answer("📌 Navigatsiya:", reply_markup=nav_kb.as_markup())
+            
+            if message.chat.id in ADMIN_IDS:
+                admin_kb = InlineKeyboardBuilder()
+                admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
+                admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
+                admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
+                admin_kb.adjust(1)
+                await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
+                
         elif listing.get('image_url'):
-            await message.answer_photo(listing['image_url'], caption=text, reply_markup=final_kb)
+            await message.answer_photo(listing['image_url'], caption=text, reply_markup=nav_kb.as_markup())
+            if message.chat.id in ADMIN_IDS:
+                admin_kb = InlineKeyboardBuilder()
+                admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
+                admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
+                admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
+                admin_kb.adjust(1)
+                await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
         else:
-            await message.answer(text, reply_markup=final_kb)
+            await message.answer(text, reply_markup=nav_kb.as_markup())
+            if message.chat.id in ADMIN_IDS:
+                admin_kb = InlineKeyboardBuilder()
+                admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
+                admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
+                admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
+                admin_kb.adjust(1)
+                await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
     except Exception as e:
         print(f"❌ Xatolik: {e}")
-        await message.answer(text, reply_markup=final_kb)
+        await message.answer(text, reply_markup=nav_kb.as_markup())
 
 @dp.message(Command("view"))
 async def view_listing_by_id(message: types.Message):
@@ -267,15 +270,6 @@ async def view_listing_by_id(message: types.Message):
             f"🆔 ID: {listing['id']}"
         )
         
-        kb = None
-        if message.from_user.id in ADMIN_IDS:
-            admin_kb = InlineKeyboardBuilder()
-            admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing_id}")
-            admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing_id}")
-            admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing_id}")
-            admin_kb.adjust(1)
-            kb = admin_kb.as_markup()
-        
         if listing.get('media_group') and len(listing['media_group']) > 1:
             media = []
             for i, photo_id in enumerate(listing['media_group']):
@@ -284,12 +278,19 @@ async def view_listing_by_id(message: types.Message):
                 else:
                     media.append(InputMediaPhoto(media=photo_id))
             await message.answer_media_group(media=media)
-            if kb:
-                await message.answer("📌 Amallar:", reply_markup=kb)
         elif listing.get('image_url'):
-            await message.answer_photo(listing['image_url'], caption=text, reply_markup=kb)
+            await message.answer_photo(listing['image_url'], caption=text)
         else:
-            await message.answer(text, reply_markup=kb)
+            await message.answer(text)
+            
+        if message.from_user.id in ADMIN_IDS:
+            admin_kb = InlineKeyboardBuilder()
+            admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing_id}")
+            admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing_id}")
+            admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing_id}")
+            admin_kb.adjust(1)
+            await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
+            
     except (IndexError, ValueError):
         await message.answer("❌ Noto'g'ri format. To'g'ri format: /view 123")
     except Exception as e:
