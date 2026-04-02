@@ -267,7 +267,8 @@ async def add_select_region(callback: types.CallbackQuery, state: FSMContext):
     kb = InlineKeyboardBuilder()
     if region_key in DISTRICTS:
         for d in DISTRICTS[region_key]:
-            district_callback = d.replace(" ", "_")
+           import urllib.parse
+district_callback = urllib.parse.quote(d)
             kb.button(text=d, callback_data=f"d_{district_callback}")
     kb.adjust(2)
     await callback.message.answer("📍 Tumanni tanlang:", reply_markup=kb.as_markup())
@@ -277,7 +278,8 @@ async def add_select_region(callback: types.CallbackQuery, state: FSMContext):
 @admin_router.callback_query(F.data.startswith("d_"))
 async def set_district(callback: types.CallbackQuery, state: FSMContext):
     district_callback = callback.data[2:]
-    district = district_callback.replace("_", " ")
+    import urllib.parse
+district = urllib.parse.unquote(district_callback)
     await state.update_data(district=district)
     await callback.message.answer(f"✅ {district} tanlandi")
 
