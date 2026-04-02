@@ -43,4 +43,4 @@ def get_listing_navigation_keyboard(region_key, district_encoded, cat_key, curre
     
     kb.button(text="🔙 Viloyatlar", callback_data="back_to_regions")
     kb.adjust(1)
-    return kb.as_markup()
+    return kb
