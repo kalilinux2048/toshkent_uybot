@@ -162,4 +162,150 @@ async def show_listing(message, listing, region_key, district_callback, cat_key,
         admin_kb = InlineKeyboardBuilder()
         admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
         admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
-        admin_kb.button(text="🏠 Ijaraga
+        admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
+        admin_kb.adjust(1)
+        
+        combined_kb = InlineKeyboardBuilder()
+        if nav_kb and hasattr(nav_kb, 'inline_keyboard'):
+            for row in nav_kb.inline_keyboard:
+                for button in row:
+                    combined_kb.button(text=button.text, callback_data=button.callback_data)
+        if admin_kb and hasattr(admin_kb, 'inline_keyboard'):
+            for row in admin_kb.inline_keyboard:
+                for button in row:
+                    combined_kb.button(text=button.text, callback_data=button.callback_data)
+        combined_kb.adjust(1)
+        final_kb = combined_kb.as_markup()
+    else:
+        final_kb = nav_kb
+    
+    try:
+        if listing.get('media_group') and len(listing['media_group']) > 1:
+            media = []
+            for i, photo_id in enumerate(listing['media_group']):
+                if i == 0:
+                    media.append(InputMediaPhoto(media=photo_id, caption=text))
+                else:
+                    media.append(InputMediaPhoto(media=photo_id))
+            
+            await message.answer_media_group(media=media)
+            await message.answer("📌 Amallar:", reply_markup=final_kb)
+            
+        elif listing.get('image_url'):
+            await message.answer_photo(
+                listing['image_url'], 
+                caption=text, 
+                reply_markup=final_kb
+            )
+        else:
+            await message.answer(text, reply_markup=final_kb)
+            
+    except Exception as e:
+        print(f"❌ Xatolik: {e}")
+        await message.answer(text, reply_markup=final_kb)
+
+@dp.message(Command("view"))
+async def view_listing_by_id(message: types.Message):
+    try:
+        listing_id = int(message.text.split()[1])
+        listing = await get_listing_by_id(listing_id)
+        
+        if not listing:
+            await message.answer("❌ Bunday ID bilan e'lon topilmadi!")
+            return
+        
+        await increment_views(listing_id)
+        
+        text = (
+            f"🏠 {listing['title']}\n"
+            f"📍 {listing['district']}\n"
+            f"💰 {listing['price']} so'm\n"
+            f"🛏 {listing['rooms']} xona\n"
+            f"📝 {listing['description']}\n"
+            f"📞 {listing['phone']}\n"
+            f"📊 Holat: {listing['status']}\n"
+            f"👁 Ko'rishlar: {listing['views_count']}\n"
+            f"🆔 ID: {listing['id']}"
+        )
+        
+        kb = None
+        if message.from_user.id in ADMIN_IDS:
+            admin_kb = InlineKeyboardBuilder()
+            admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing_id}")
+            admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing_id}")
+            admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing_id}")
+            admin_kb.adjust(1)
+            kb = admin_kb.as_markup()
+        
+        if listing.get('media_group') and len(listing['media_group']) > 1:
+            media = []
+            for i, photo_id in enumerate(listing['media_group']):
+                if i == 0:
+                    media.append(InputMediaPhoto(media=photo_id, caption=text))
+                else:
+                    media.append(InputMediaPhoto(media=photo_id))
+            
+            await message.answer_media_group(media=media)
+            if kb:
+                await message.answer("📌 Amallar:", reply_markup=kb)
+                
+        elif listing.get('image_url'):
+            await message.answer_photo(listing['image_url'], caption=text, reply_markup=kb)
+        else:
+            await message.answer(text, reply_markup=kb)
+            
+    except (IndexError, ValueError):
+        await message.answer("❌ Noto'g'ri format. To'g'ri format: /view 123")
+    except Exception as e:
+        await message.answer(f"❌ Xatolik: {e}")
+
+# ADMIN TEZKOR TUGMALAR
+@dp.callback_query(F.data.startswith("admin_delete_"))
+async def admin_quick_delete(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("🚫 Ruxsat yo'q!")
+        return
+    
+    listing_id = int(callback.data.replace("admin_delete_", ""))
+    await delete_listing_by_id(listing_id)
+    await callback.answer("✅ E'lon o'chirildi!")
+    await callback.message.delete()
+
+@dp.callback_query(F.data.startswith("admin_sold_"))
+async def admin_quick_sold(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("🚫 Ruxsat yo'q!")
+        return
+    
+    listing_id = int(callback.data.replace("admin_sold_", ""))
+    await update_listing_status(listing_id, 'sold')
+    await callback.answer("✅ Sotilgan deb belgilandi!")
+    
+    if callback.message.caption:
+        new_text = callback.message.caption + "\n\n✅ HOLAT: SOTILGAN"
+        await callback.message.edit_caption(caption=new_text)
+
+@dp.callback_query(F.data.startswith("admin_rented_"))
+async def admin_quick_rented(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("🚫 Ruxsat yo'q!")
+        return
+    
+    listing_id = int(callback.data.replace("admin_rented_", ""))
+    await update_listing_status(listing_id, 'rented')
+    await callback.answer("✅ Ijaraga berilgan deb belgilandi!")
+    
+    if callback.message.caption:
+        new_text = callback.message.caption + "\n\n✅ HOLAT: IJARAGA BERILGAN"
+        await callback.message.edit_caption(caption=new_text)
+
+async def main():
+    await init_db()
+    print("✅ Bot ishga tushdi!")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    t = Thread(target=run_web_server)
+    t.daemon = True
+    t.start()
+    asyncio.run(main())
