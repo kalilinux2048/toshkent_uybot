@@ -1,14 +1,12 @@
 import asyncio
 import os
-import urllib.parse
-
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InputMediaPhoto
 
-from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS
+from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS, DISTRICTS
 from database import init_db, get_all_listings, increment_views, get_listing_by_id, delete_listing_by_id, update_listing_status
 from keyboards import (
     get_regions_keyboard,
@@ -57,11 +55,15 @@ async def select_region(call: types.CallbackQuery):
 async def select_district(call: types.CallbackQuery):
     await call.answer()
     try:
-        parts = call.data.split("_")
+        data = call.data
+        parts = data.split("_")
         region_key = parts[1]
-        district_callback = "_".join(parts[2:])
-        district = urllib.parse.unquote(district_callback)
-
+        district_parts = parts[2:]
+        district_callback = "_".join(district_parts)
+        district = district_callback.replace("_", " ")
+        # Bo'shliqlarni tozalash
+        district = ' '.join(district.split())
+        
         await call.message.answer(
             f"✅ {district} tanlandi\n\n📂 Kategoriya tanlang:",
             reply_markup=get_categories_keyboard(region_key, district_callback)
@@ -74,14 +76,25 @@ async def select_district(call: types.CallbackQuery):
 async def select_category(call: types.CallbackQuery):
     await call.answer()
     try:
-        parts = call.data.split("_")
+        data = call.data
+        parts = data.split("_")
         region_key = parts[1]
         cat_key = parts[-1]
-        district_callback = "_".join(parts[2:-1])
-        district = urllib.parse.unquote(district_callback)
+        district_parts = parts[2:-1]
+        district_callback = "_".join(district_parts)
+        district = district_callback.replace("_", " ")
+        # Bo'shliqlarni tozalash
+        district = ' '.join(district.split())
         cat_name = CATEGORIES[cat_key]
 
+        # DEBUG: Qanday qiymatlar kelayotganini ko'rish
+        print(f"DEBUG: Qidiruv - district = '{district}'")
+        print(f"DEBUG: Qidiruv - cat_name = '{cat_name}'")
+        
         listings = await get_all_listings(district, cat_name)
+        
+        print(f"DEBUG: {len(listings)} ta e'lon topildi")
+        
         total_count = len(listings)
 
         if total_count == 0:
@@ -104,12 +117,15 @@ async def back_to_regions(call: types.CallbackQuery):
 async def navigate_listings(call: types.CallbackQuery):
     await call.answer()
     try:
-        parts = call.data.split("_")
+        data = call.data
+        parts = data.split("_")
         region_key = parts[1]
         cat_key = parts[-2]
         new_index = int(parts[-1])
-        district_callback = "_".join(parts[2:-2])
-        district = urllib.parse.unquote(district_callback)
+        district_parts = parts[2:-2]
+        district_callback = "_".join(district_parts)
+        district = district_callback.replace("_", " ")
+        district = ' '.join(district.split())
         cat_name = CATEGORIES[cat_key]
 
         listings = await get_all_listings(district, cat_name)
@@ -127,7 +143,7 @@ async def navigate_listings(call: types.CallbackQuery):
 
 async def show_listing(message, listing, region_key, district_callback, cat_key, current_index, total_count):
     await increment_views(listing["id"])
-
+    
     text = (
         f"🏠 {listing['title']}\n"
         f"📍 {listing['district']}\n"
@@ -139,41 +155,11 @@ async def show_listing(message, listing, region_key, district_callback, cat_key,
         f"🆔 ID: {listing['id']}\n"
         f"📊 {current_index+1}/{total_count} e'lon"
     )
-
+    
     nav_kb = get_listing_navigation_keyboard(region_key, district_callback, cat_key, current_index, total_count)
-
-    try:
-        if listing.get('media_group') and len(listing['media_group']) > 1:
-            media = []
-            for i, photo_id in enumerate(listing['media_group']):
-                if i == 0:
-                    media.append(InputMediaPhoto(media=photo_id, caption=text))
-                else:
-                    media.append(InputMediaPhoto(media=photo_id))
-
-            await message.answer_media_group(media=media)
-            await message.answer("📌 Amallar:", reply_markup=nav_kb)
-
-        elif listing.get('image_url'):
-            await message.answer_photo(
-                listing['image_url'],
-                caption=text,
-                reply_markup=nav_kb
-            )
-        else:
-            await message.answer(text, reply_markup=nav_kb)
-
-    except Exception as e:
-        print(f"❌ Xatolik: {e}")
-        await message.answer(text, reply_markup=nav_kb)
-
-async def main():
-    await init_db()
-    print("✅ Bot ishga tushdi!")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    t = Thread(target=run_web_server)
-    t.daemon = True
-    t.start()
-    asyncio.run(main())
+    
+    if message.chat.id in ADMIN_IDS:
+        admin_kb = InlineKeyboardBuilder()
+        admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
+        admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
+        admin_kb.button(text="🏠 Ijaraga
