@@ -8,7 +8,7 @@ async def init_db():
         DATABASE_URL = os.getenv('DATABASE_URL')
         
         if not DATABASE_URL:
-            print("❌ DATABASE_URL topilmadi! PostgreSQL yaratganmisiz?")
+            print("❌ DATABASE_URL topilmadi!")
             return False
         
         conn = await asyncpg.connect(DATABASE_URL)
@@ -42,7 +42,6 @@ async def init_db():
         return False
 
 def normalize_text(text):
-    """Matnni normallashtirish - probellarni tozalash"""
     if not text:
         return text
     return ' '.join(text.strip().split())
@@ -107,12 +106,7 @@ async def get_all_listings_raw():
     """)
     
     await conn.close()
-    
-    result = []
-    for row in rows:
-        result.append(dict(row))
-    
-    return result
+    return [dict(row) for row in rows]
 
 async def get_all_listings(district, category):
     DATABASE_URL = os.getenv('DATABASE_URL')
