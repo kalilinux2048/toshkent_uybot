@@ -1,5 +1,6 @@
 import asyncio
 import os
+import urllib.parse
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -34,7 +35,6 @@ dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(admin_router)
 
 def normalize_text(text):
-    """Matnni normallashtirish"""
     if not text:
         return text
     return ' '.join(text.strip().split())
@@ -49,18 +49,15 @@ async def start(message: types.Message):
 
 @dp.message(Command("test"))
 async def test_command(message: types.Message):
-    """Test komandasi - bazadagi ma'lumotlarni tekshirish"""
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("🚫 Ruxsat yo'q!")
         return
     
-    # 1. Bazadagi barcha e'lonlarni ko'rsatish
     all_listings = await get_all_listings_raw()
     text = "📋 Bazadagi so'nggi 30 e'lon:\n\n"
     for l in all_listings:
         text += f"ID: {l['id']}, District: '{l['district']}', Category: {l['category'][:20]}, Status: {l['status']}\n"
     
-    # 2. Toshkent shahri tumanlari uchun test
     test_districts = ["Bektemir tumani", "Chilonzor tumani", "Mirzo Ulug'bek tumani", "Yunusobod tumani"]
     text += "\n🔍 Qidiruv testi:\n"
     for td in test_districts:
@@ -69,9 +66,6 @@ async def test_command(message: types.Message):
             if count > 0:
                 text += f"✅ {td} / {cat_name[:20]}: {count} ta\n"
     
-    text += "\n💡 Agar hech nima ko'rinmasa, yangi e'lon qo'shib ko'ring."
-    
-    # Xabarni bo'lib yuborish (agar uzun bo'lsa)
     if len(text) > 4000:
         for i in range(0, len(text), 4000):
             await message.answer(text[i:i+4000])
@@ -93,60 +87,54 @@ async def select_district(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        parts = data.split("_")
+        parts = data.split("_", 2)
+        if len(parts) < 3:
+            raise ValueError("Invalid format")
+        
         region_key = parts[1]
-        district_parts = parts[2:]
-        district_callback = "_".join(district_parts)
-        district = district_callback.replace("_", " ")
+        district_encoded = parts[2]
+        district = urllib.parse.unquote(district_encoded)
         district = normalize_text(district)
         
         await call.message.answer(
             f"✅ {district} tanlandi\n\n📂 Kategoriya tanlang:",
-            reply_markup=get_categories_keyboard(region_key, district_callback)
+            reply_markup=get_categories_keyboard(region_key, district_encoded)
         )
     except Exception as e:
         print(f"❌ Xatolik: {e}")
         await call.message.answer("❌ Xatolik yuz berdi")
 
-@dp.callback_query(F.data.startswith("category_"))
+@dp.callback_query(F.data.startswith("cat_"))
 async def select_category(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        parts = data.split("_")
-        
-        # DEBUG: Barcha qismlarni chiqarish
-        print(f"DEBUG: Full callback data: {data}")
-        print(f"DEBUG: Parts: {parts}")
+        parts = data.split("_", 3)
+        if len(parts) < 4:
+            raise ValueError("Invalid format")
         
         region_key = parts[1]
-        cat_key = parts[-1]
+        district_encoded = parts[2]
+        cat_key = parts[3]
         
-        # district_parts ni to'g'ri aniqlash (2-indexdan oxirgidan oldingigacha)
-        district_parts = parts[2:-1]
-        district_callback = "_".join(district_parts)
-        district = district_callback.replace("_", " ")
+        district = urllib.parse.unquote(district_encoded)
         district = normalize_text(district)
-        
         cat_name = CATEGORIES[cat_key]
 
         print(f"DEBUG: region_key = '{region_key}'")
-        print(f"DEBUG: cat_key = '{cat_key}'")
         print(f"DEBUG: district = '{district}'")
         print(f"DEBUG: cat_name = '{cat_name}'")
         
         listings = await get_all_listings(district, cat_name)
         
-        print(f"DEBUG: {len(listings)} ta e'lon topildi")
-        
         total_count = len(listings)
 
         if total_count == 0:
-            await call.message.answer(f"❌ {district} tumanida {cat_name} bo'yicha e'lon topilmadi\n\n💡 Yangi e'lon qo'shish uchun /admin buyrug'idan foydalaning.")
+            await call.message.answer(f"❌ {district} tumanida {cat_name} bo'yicha e'lon topilmadi")
             return
 
         await show_listing(
-            call.message, listings[0], region_key, district_callback, cat_key, 0, total_count
+            call.message, listings[0], region_key, district_encoded, cat_key, 0, total_count
         )
     except Exception as e:
         print(f"❌ Xatolik: {e}")
@@ -164,13 +152,16 @@ async def navigate_listings(call: types.CallbackQuery):
     await call.answer()
     try:
         data = call.data
-        parts = data.split("_")
+        parts = data.split("_", 4)
+        if len(parts) < 5:
+            raise ValueError("Invalid format")
+        
         region_key = parts[1]
-        cat_key = parts[-2]
-        new_index = int(parts[-1])
-        district_parts = parts[2:-2]
-        district_callback = "_".join(district_parts)
-        district = district_callback.replace("_", " ")
+        district_encoded = parts[2]
+        cat_key = parts[3]
+        new_index = int(parts[4])
+        
+        district = urllib.parse.unquote(district_encoded)
         district = normalize_text(district)
         cat_name = CATEGORIES[cat_key]
 
@@ -179,7 +170,7 @@ async def navigate_listings(call: types.CallbackQuery):
 
         if 0 <= new_index < total_count:
             await show_listing(
-                call.message, listings[new_index], region_key, district_callback, cat_key, new_index, total_count
+                call.message, listings[new_index], region_key, district_encoded, cat_key, new_index, total_count
             )
         else:
             await call.message.answer("❌ E'lon topilmadi")
@@ -187,7 +178,7 @@ async def navigate_listings(call: types.CallbackQuery):
         print(f"❌ Xatolik: {e}")
         await call.message.answer("❌ Xatolik yuz berdi")
 
-async def show_listing(message, listing, region_key, district_callback, cat_key, current_index, total_count):
+async def show_listing(message, listing, region_key, district_encoded, cat_key, current_index, total_count):
     await increment_views(listing["id"])
     
     text = (
@@ -202,7 +193,7 @@ async def show_listing(message, listing, region_key, district_callback, cat_key,
         f"📊 {current_index+1}/{total_count} e'lon"
     )
     
-    nav_kb = get_listing_navigation_keyboard(region_key, district_callback, cat_key, current_index, total_count)
+    nav_kb = get_listing_navigation_keyboard(region_key, district_encoded, cat_key, current_index, total_count)
     
     if message.chat.id in ADMIN_IDS:
         admin_kb = InlineKeyboardBuilder()
@@ -305,7 +296,6 @@ async def view_listing_by_id(message: types.Message):
     except Exception as e:
         await message.answer(f"❌ Xatolik: {e}")
 
-# ADMIN TEZKOR TUGMALAR
 @dp.callback_query(F.data.startswith("admin_delete_"))
 async def admin_quick_delete(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
