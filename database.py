@@ -13,11 +13,12 @@ async def init_db():
         
         conn = await asyncpg.connect(DATABASE_URL)
         
+        # Asosiy e'lonlar jadvali
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS listings (
             id SERIAL PRIMARY KEY,
-            region TEXT,
-            district TEXT,
+            region_key TEXT,
+            region_name TEXT,
             category TEXT,
             title TEXT,
             price TEXT,
@@ -28,8 +29,25 @@ async def init_db():
             media_group TEXT,
             views_count INTEGER DEFAULT 0,
             status TEXT DEFAULT 'active',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            source_chat_id TEXT,
+            source_chat_title TEXT,
+            source_message_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        # Kanal biriktirish jadvali (bir viloyatga ko'p kanal)
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS channel_bindings (
+            id SERIAL PRIMARY KEY,
+            region_key TEXT,
+            region_name TEXT,
+            channel_id TEXT,
+            channel_title TEXT,
+            channel_username TEXT,
+            is_active BOOLEAN DEFAULT TRUE,
+            last_sync TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
         
@@ -41,84 +59,106 @@ async def init_db():
         print(f"❌ PostgreSQL xatolik: {e}")
         return False
 
-def normalize_text(text):
-    if not text:
-        return text
-    return ' '.join(text.strip().split())
+# ============ E'LONLAR BILAN ISHLASH ============
 
-async def add_listing(**kwargs):
+async def add_or_update_listing(region_key, region_name, category, source_chat_id, source_chat_title, source_message_id, **kwargs):
+    """E'lon qo'shish yoki yangilash"""
     DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
     try:
-        district = normalize_text(kwargs['district'])
-        title = normalize_text(kwargs['title'])
-        description = normalize_text(kwargs['description'])
-        phone = normalize_text(kwargs['phone'])
-        price = normalize_text(kwargs['price'])
-        rooms = normalize_text(kwargs['rooms'])
+        # Avval shu xabar saqlanganmi tekshirish
+        existing = await conn.fetchrow("""
+        SELECT id FROM listings WHERE source_chat_id = $1 AND source_message_id = $2
+        """, str(source_chat_id), str(source_message_id))
         
-        if 'media_group' in kwargs and kwargs['media_group']:
-            media_group_json = json.dumps(kwargs['media_group'])
-            image_url = kwargs['media_group'][0]
+        if existing:
+            # Yangilash
+            await conn.execute("""
+            UPDATE listings SET 
+                title = $1, price = $2, rooms = $3, description = $4, phone = $5,
+                image_url = $6, media_group = $7, updated_at = CURRENT_TIMESTAMP
+            WHERE source_chat_id = $8 AND source_message_id = $9
+            """,
+                kwargs.get('title', 'E\'lon')[:200],
+                kwargs.get('price', 'Narxi aniqlanmadi'),
+                kwargs.get('rooms', '?'),
+                kwargs.get('description', '')[:1000],
+                kwargs.get('phone', 'Raqam topilmadi'),
+                kwargs.get('image_url'),
+                kwargs.get('media_group'),
+                str(source_chat_id),
+                str(source_message_id)
+            )
+            return existing['id']
         else:
-            media_group_json = None
-            image_url = kwargs.get('image_url')
-        
-        result = await conn.fetchrow("""
-        INSERT INTO listings (
-            region, district, category, title, price, rooms, 
-            description, phone, image_url, media_group, status
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active')
-        RETURNING id
-        """, 
-            kwargs.get('region', 'tashkent_city'),
-            district,
-            kwargs['category'],
-            title,
-            price,
-            rooms,
-            description,
-            phone,
-            image_url,
-            media_group_json
-        )
-        
-        await conn.close()
-        print(f"✅ E'lon qo'shildi: ID={result['id']}, District='{district}'")
-        return result['id']
+            # Yangi qo'shish
+            result = await conn.fetchrow("""
+            INSERT INTO listings (
+                region_key, region_name, category, title, price, rooms, 
+                description, phone, image_url, media_group, status,
+                source_chat_id, source_chat_title, source_message_id
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', $11, $12, $13)
+            RETURNING id
+            """, 
+                region_key,
+                region_name,
+                category,
+                kwargs.get('title', 'E\'lon')[:200],
+                kwargs.get('price', 'Narxi aniqlanmadi'),
+                kwargs.get('rooms', '?'),
+                kwargs.get('description', '')[:1000],
+                kwargs.get('phone', 'Raqam topilmadi'),
+                kwargs.get('image_url'),
+                kwargs.get('media_group'),
+                str(source_chat_id),
+                source_chat_title,
+                str(source_message_id)
+            )
+            
+            # Har bir kanalda MAX_LISTINGS_PER_CHANNEL dan ortiq bo'lsa, eskilarni o'chirish
+            await cleanup_old_listings(conn, source_chat_id)
+            
+            return result['id']
         
     except Exception as e:
         await conn.close()
-        print(f"❌ add_listing xatolik: {e}")
         raise e
+    finally:
+        await conn.close()
 
-async def get_all_listings_raw():
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    conn = await asyncpg.connect(DATABASE_URL)
+
+async def cleanup_old_listings(conn, source_chat_id):
+    """Bir kanaldagi eski e'lonlarni tozalash (faqat oxirgi 10 tasi qolsin)"""
+    from config import MAX_LISTINGS_PER_CHANNEL
     
+    # Shu kanaldagi e'lonlarni vaqt bo'yicha tartiblash
     rows = await conn.fetch("""
-    SELECT id, district, category, status, title, region 
-    FROM listings 
-    ORDER BY id DESC
-    LIMIT 30
-    """)
+    SELECT id FROM listings 
+    WHERE source_chat_id = $1 AND status = 'active'
+    ORDER BY created_at DESC
+    """, str(source_chat_id))
     
-    await conn.close()
-    return [dict(row) for row in rows]
+    # Agar 10 tadan ko'p bo'lsa, qolganlarini o'chirish
+    if len(rows) > MAX_LISTINGS_PER_CHANNEL:
+        to_delete = rows[MAX_LISTINGS_PER_CHANNEL:]
+        for row in to_delete:
+            await conn.execute("UPDATE listings SET status = 'deleted' WHERE id = $1", row['id'])
+        print(f"🗑 {len(to_delete)} ta eski e'lon o'chirildi (kanal: {source_chat_id})")
 
-async def get_all_listings(district, category):
+
+async def get_listings_by_region(region_key, category, limit=50):
+    """Viloyat bo'yicha faol e'lonlarni olish (eng yangilari birinchi)"""
     DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
-    
-    district_norm = normalize_text(district)
     
     rows = await conn.fetch("""
     SELECT * FROM listings
-    WHERE LOWER(district) = LOWER($1) AND category = $2 AND status = 'active'
-    ORDER BY id DESC
-    """, district_norm, category)
+    WHERE region_key = $1 AND category = $2 AND status = 'active'
+    ORDER BY created_at DESC
+    LIMIT $3
+    """, region_key, category, limit)
     
     await conn.close()
     
@@ -134,17 +174,6 @@ async def get_all_listings(district, category):
     
     return result
 
-async def increment_views(listing_id):
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute("UPDATE listings SET views_count = views_count + 1 WHERE id = $1", listing_id)
-    await conn.close()
-
-async def delete_listing_by_id(listing_id):
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute("DELETE FROM listings WHERE id = $1", listing_id)
-    await conn.close()
 
 async def get_listing_by_id(listing_id):
     DATABASE_URL = os.getenv('DATABASE_URL')
@@ -162,34 +191,139 @@ async def get_listing_by_id(listing_id):
         return row_dict
     return None
 
+
+async def delete_listing_by_id(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("UPDATE listings SET status = 'deleted' WHERE id = $1", listing_id)
+    await conn.close()
+
+
+async def delete_listing_by_source(source_chat_id, source_message_id):
+    """Manba bo'yicha e'lonni o'chirish"""
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("""
+    UPDATE listings SET status = 'deleted' 
+    WHERE source_chat_id = $1 AND source_message_id = $2
+    """, str(source_chat_id), str(source_message_id))
+    await conn.close()
+
+
+async def increment_views(listing_id):
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("UPDATE listings SET views_count = views_count + 1 WHERE id = $1", listing_id)
+    await conn.close()
+
+
+# ============ KANAL BIRIKTIRISH ============
+
+async def add_channel_binding(region_key, region_name, channel_id, channel_title, channel_username=""):
+    """Kanalni viloyatga biriktirish"""
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    # Avval shu kanal biriktirilganmi tekshirish
+    existing = await conn.fetchrow("""
+    SELECT id FROM channel_bindings WHERE channel_id = $1
+    """, str(channel_id))
+    
+    if existing:
+        await conn.execute("""
+        UPDATE channel_bindings SET 
+            region_key = $1, region_name = $2, channel_title = $3, 
+            channel_username = $4, is_active = TRUE, updated_at = CURRENT_TIMESTAMP
+        WHERE channel_id = $5
+        """, region_key, region_name, channel_title, channel_username, str(channel_id))
+    else:
+        await conn.execute("""
+        INSERT INTO channel_bindings (region_key, region_name, channel_id, channel_title, channel_username)
+        VALUES ($1, $2, $3, $4, $5)
+        """, region_key, region_name, str(channel_id), channel_title, channel_username)
+    
+    await conn.close()
+
+
+async def remove_channel_binding(channel_id):
+    """Kanal biriktirishni o'chirish"""
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    await conn.execute("""
+    UPDATE channel_bindings SET is_active = FALSE WHERE channel_id = $1
+    """, str(channel_id))
+    
+    # Shu kanaldagi barcha e'lonlarni ham o'chirish
+    await conn.execute("""
+    UPDATE listings SET status = 'deleted' WHERE source_chat_id = $1
+    """, str(channel_id))
+    
+    await conn.close()
+
+
+async def get_channels_by_region(region_key):
+    """Viloyatga biriktirilgan barcha faol kanallarni olish"""
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    rows = await conn.fetch("""
+    SELECT * FROM channel_bindings 
+    WHERE region_key = $1 AND is_active = TRUE
+    ORDER BY created_at DESC
+    """, region_key)
+    
+    await conn.close()
+    return [dict(row) for row in rows]
+
+
+async def get_all_active_channels():
+    """Barcha faol kanallarni olish"""
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    rows = await conn.fetch("""
+    SELECT * FROM channel_bindings WHERE is_active = TRUE
+    """)
+    
+    await conn.close()
+    return [dict(row) for row in rows]
+
+
+async def update_channel_sync_time(channel_id):
+    """Kanalning oxirgi sinxronizatsiya vaqtini yangilash"""
+    DATABASE_URL = os.getenv('DATABASE_URL')
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    await conn.execute("""
+    UPDATE channel_bindings SET last_sync = CURRENT_TIMESTAMP WHERE channel_id = $1
+    """, str(channel_id))
+    
+    await conn.close()
+
+
 async def get_admin_statistics():
     DATABASE_URL = os.getenv('DATABASE_URL')
     conn = await asyncpg.connect(DATABASE_URL)
     
-    total = await conn.fetchval("SELECT COUNT(*) FROM listings")
-    active = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE status='active'")
-    sold = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE status='sold'")
-    rented = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE status='rented'")
-    total_views = await conn.fetchval("SELECT COALESCE(SUM(views_count), 0) FROM listings")
+    total = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE status = 'active'")
+    total_channels = await conn.fetchval("SELECT COUNT(*) FROM channel_bindings WHERE is_active = TRUE")
+    total_views = await conn.fetchval("SELECT COALESCE(SUM(views_count), 0) FROM listings WHERE status = 'active'")
     
-    categories = await conn.fetch("SELECT category, COUNT(*) FROM listings WHERE status='active' GROUP BY category")
-    regions = await conn.fetch("SELECT region, COUNT(*) FROM listings WHERE status='active' GROUP BY region ORDER BY count DESC LIMIT 5")
-    districts = await conn.fetch("SELECT district, COUNT(*) FROM listings WHERE status='active' GROUP BY district ORDER BY count DESC LIMIT 5")
-    
-    week_ago = datetime.now() - timedelta(days=7)
-    last_week = await conn.fetchval("SELECT COUNT(*) FROM listings WHERE created_at > $1", week_ago)
-    top_listings = await conn.fetch("SELECT title, views_count FROM listings ORDER BY views_count DESC LIMIT 5")
+    # Viloyatlar bo'yicha statistika
+    region_stats = await conn.fetch("""
+    SELECT region_name, COUNT(*) as count 
+    FROM listings 
+    WHERE status = 'active' 
+    GROUP BY region_name 
+    ORDER BY count DESC
+    """)
     
     await conn.close()
     
     return {
-        'total': total, 'active': active, 'sold': sold, 'rented': rented,
-        'total_views': total_views, 'categories': categories, 'regions': regions,
-        'districts': districts, 'last_week': last_week, 'top_listings': top_listings
+        'total': total,
+        'total_channels': total_channels,
+        'total_views': total_views,
+        'region_stats': [dict(r) for r in region_stats]
     }
-
-async def update_listing_status(listing_id, status):
-    DATABASE_URL = os.getenv('DATABASE_URL')
-    conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute("UPDATE listings SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", status, listing_id)
-    await conn.close()
