@@ -1,21 +1,15 @@
 import asyncio
 import os
-import base64
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import InputMediaPhoto
 
-from config import BOT_TOKEN, CATEGORIES, ADMIN_IDS, REGIONS
-from database import init_db, get_all_listings, increment_views, get_listing_by_id, delete_listing_by_id, update_listing_status, get_all_listings_raw
-from keyboards import (
-    get_regions_keyboard,
-    get_districts_keyboard,
-    get_categories_keyboard,
-    get_listing_navigation_keyboard
-)
+from config import BOT_TOKEN, ADMIN_IDS, REGIONS, CATEGORIES
+from database import init_db, get_listings_by_region, get_listing_by_id, increment_views
+from keyboards import get_regions_keyboard, get_categories_keyboard, get_listing_navigation_keyboard
 from admin import admin_router
+from collector import run_collector
 
 from flask import Flask
 from threading import Thread
@@ -34,207 +28,84 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(admin_router)
 
-def normalize_text(text):
-    if not text:
-        return text
-    return ' '.join(text.strip().split())
-
-def decode_district(encoded):
-    try:
-        decoded_bytes = base64.urlsafe_b64decode(encoded)
-        return decoded_bytes.decode('utf-8')
-    except Exception as e:
-        print(f"Decode error: {e}")
-        return encoded
-
+# Foydalanuvchi uchun
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
-        "🇺🇿 O'zbekiston Uy Bot\n\n🏘 Uy va xonadonlar qidirish uchun viloyatni tanlang:",
+        "🏠 **Ko'chmas mulk botiga xush kelibsiz!**\n\n"
+        "Viloyatni tanlang va e'lonlarni ko'ring:",
         reply_markup=get_regions_keyboard()
     )
-
-@dp.message(Command("test"))
-async def test_command(message: types.Message):
-    if message.from_user.id not in ADMIN_IDS:
-        await message.answer("🚫 Ruxsat yo'q!")
-        return
-    
-    all_listings = await get_all_listings_raw()
-    text = "📋 Bazadagi so'nggi 30 e'lon:\n\n"
-    for l in all_listings:
-        text += f"ID: {l['id']}, District: '{l['district']}', Category: {l['category'][:20]}, Status: {l['status']}\n"
-    
-    if len(text) > 4000:
-        for i in range(0, len(text), 4000):
-            await message.answer(text[i:i+4000])
-    else:
-        await message.answer(text)
 
 @dp.callback_query(F.data.startswith("region_"))
 async def select_region(call: types.CallbackQuery):
     await call.answer()
     region_key = call.data.replace("region_", "")
     region_name = REGIONS[region_key]
+    
     await call.message.answer(
-        f"📍 {region_name} - tumanni tanlang:",
-        reply_markup=get_districts_keyboard(region_key)
+        f"📍 **{region_name}**\n\nKategoriya tanlang:",
+        reply_markup=get_categories_keyboard(region_key)
     )
 
-@dp.callback_query(F.data.startswith("district_"))
-async def select_district(call: types.CallbackQuery):
-    await call.answer()
-    try:
-        data = call.data
-        # district_{region_key}_{encoded}
-        # region_key ichida _ bo'lishi mumkin (tashkent_city)
-        # Shuning uchun birinchi _ dan keyin region_key ni olish
-        first_underscore = data.find('_')
-        second_underscore = data.find('_', first_underscore + 1)
-        
-        if first_underscore == -1 or second_underscore == -1:
-            raise ValueError("Invalid format")
-        
-        region_key = data[first_underscore + 1:second_underscore]
-        district_encoded = data[second_underscore + 1:]
-        
-        district = decode_district(district_encoded)
-        district = normalize_text(district)
-        
-        await call.message.answer(
-            f"✅ {district} tanlandi\n\n📂 Kategoriya tanlang:",
-            reply_markup=get_categories_keyboard(region_key, district_encoded)
-        )
-    except Exception as e:
-        print(f"❌ Xatolik: {e}")
-        await call.message.answer("❌ Xatolik yuz berdi")
-
-@dp.callback_query(F.data.startswith("cat_"))
+@dp.callback_query(F.data.startswith("category_"))
 async def select_category(call: types.CallbackQuery):
     await call.answer()
     try:
-        data = call.data
-        print(f"DEBUG: Full callback: {data}")
+        _, region_key, cat_key = call.data.split("_")
+        region_name = REGIONS[region_key]
+        category_name = CATEGORIES[cat_key]
         
-        # cat_{region_key}_{encoded}_{cat_key}
-        # region_key ichida _ bo'lishi mumkin (tashkent_city)
-        # Shuning uchun cat_ dan keyingi qismni to'g'ri ajratish
+        listings = await get_listings_by_region(region_key, category_name)
         
-        # cat_ ni olib tashlaymiz
-        without_cat = data[4:]
-        
-        # Oxirgi _ dan keyin cat_key
-        last_underscore = without_cat.rfind('_')
-        if last_underscore == -1:
-            raise ValueError("Invalid format")
-        
-        cat_key = without_cat[last_underscore + 1:]
-        rest = without_cat[:last_underscore]
-        
-        # rest = region_key_encoded
-        # Birinchi _ dan keyin region_key, qolgani encoded
-        first_underscore = rest.find('_')
-        if first_underscore == -1:
-            raise ValueError("Invalid format")
-        
-        region_key = rest[:first_underscore]
-        district_encoded = rest[first_underscore + 1:]
-        
-        district = decode_district(district_encoded)
-        district = normalize_text(district)
-        cat_name = CATEGORIES[cat_key]
-        
-        print(f"DEBUG: region_key='{region_key}'")
-        print(f"DEBUG: district_encoded='{district_encoded}'")
-        print(f"DEBUG: district='{district}'")
-        print(f"DEBUG: cat_name='{cat_name}'")
-        
-        listings = await get_all_listings(district, cat_name)
-        total_count = len(listings)
-        
-        print(f"DEBUG: Found {total_count} listings")
-
-        if total_count == 0:
-            await call.message.answer(f"❌ {district} tumanida {cat_name} bo'yicha e'lon topilmadi")
+        if not listings:
+            await call.message.answer(f"❌ {region_name} da {category_name} bo'yicha e'lon topilmadi!")
             return
-
-        await show_listing(
-            call.message, listings[0], region_key, district_encoded, cat_key, 0, total_count
-        )
+        
+        await show_listing(call.message, listings[0], region_key, cat_key, 0, len(listings))
+        
     except Exception as e:
-        print(f"❌ Xatolik: {e}")
-        import traceback
-        traceback.print_exc()
-        await call.message.answer(f"❌ Xatolik yuz berdi: {str(e)[:100]}")
-
-@dp.callback_query(F.data == "back_to_regions")
-async def back_to_regions(call: types.CallbackQuery):
-    await call.answer()
-    await call.message.answer("🇺🇿 Viloyatni tanlang:", reply_markup=get_regions_keyboard())
+        print(f"Xatolik: {e}")
+        await call.message.answer("❌ Xatolik yuz berdi!")
 
 @dp.callback_query(F.data.startswith("nav_"))
 async def navigate_listings(call: types.CallbackQuery):
     await call.answer()
     try:
-        data = call.data
-        # nav_{region_key}_{encoded}_{cat_key}_{index}
-        without_nav = data[4:]
+        _, region_key, cat_key, index_str = call.data.split("_")
+        current_index = int(index_str)
+        category_name = CATEGORIES[cat_key]
         
-        last_underscore = without_nav.rfind('_')
-        if last_underscore == -1:
-            raise ValueError("Invalid format")
+        listings = await get_listings_by_region(region_key, category_name)
         
-        index_str = without_nav[last_underscore + 1:]
-        rest = without_nav[:last_underscore]
-        
-        second_last_underscore = rest.rfind('_')
-        if second_last_underscore == -1:
-            raise ValueError("Invalid format")
-        
-        cat_key = rest[second_last_underscore + 1:]
-        rest2 = rest[:second_last_underscore]
-        
-        first_underscore = rest2.find('_')
-        if first_underscore == -1:
-            raise ValueError("Invalid format")
-        
-        region_key = rest2[:first_underscore]
-        district_encoded = rest2[first_underscore + 1:]
-        new_index = int(index_str)
-        
-        district = decode_district(district_encoded)
-        district = normalize_text(district)
-        cat_name = CATEGORIES[cat_key]
-
-        listings = await get_all_listings(district, cat_name)
-        total_count = len(listings)
-
-        if 0 <= new_index < total_count:
-            await show_listing(
-                call.message, listings[new_index], region_key, district_encoded, cat_key, new_index, total_count
-            )
+        if 0 <= current_index < len(listings):
+            await show_listing(call.message, listings[current_index], region_key, cat_key, current_index, len(listings))
         else:
-            await call.message.answer("❌ E'lon topilmadi")
+            await call.message.answer("❌ E'lon topilmadi!")
+            
     except Exception as e:
-        print(f"❌ Xatolik: {e}")
-        await call.message.answer("❌ Xatolik yuz berdi")
+        print(f"Xatolik: {e}")
+        await call.message.answer("❌ Xatolik yuz berdi!")
 
-async def show_listing(message, listing, region_key, district_encoded, cat_key, current_index, total_count):
+async def show_listing(message, listing, region_key, cat_key, current_index, total_count):
     await increment_views(listing["id"])
     
-    text = (
-        f"🏠 {listing['title']}\n"
-        f"📍 {listing['district']}\n"
-        f"💰 {listing['price']} so'm\n"
-        f"🛏 {listing['rooms']} xona\n"
-        f"📝 {listing['description']}\n"
-        f"📞 {listing['phone']}\n"
-        f"👁 Ko'rishlar: {listing['views_count']}\n"
-        f"🆔 ID: {listing['id']}\n"
-        f"📊 {current_index+1}/{total_count} e'lon"
-    )
+    text = f"""
+🏠 **{listing['title']}**
+
+📍 **Manzil:** {listing['region_name']}
+💰 **Narx:** {listing['price']} so'm
+🛏 **Xonalar:** {listing['rooms']} xona
+📞 **Telefon:** {listing['phone']}
+
+📝 **Tavsif:**
+{listing['description']}
+
+👁 Ko'rishlar: {listing['views_count']}
+🆔 ID: {listing['id']}
+"""
     
-    nav_kb = get_listing_navigation_keyboard(region_key, district_encoded, cat_key, current_index, total_count)
+    kb = get_listing_navigation_keyboard(region_key, cat_key, current_index, total_count)
     
     try:
         if listing.get('media_group') and len(listing['media_group']) > 1:
@@ -245,37 +116,19 @@ async def show_listing(message, listing, region_key, district_encoded, cat_key, 
                 else:
                     media.append(InputMediaPhoto(media=photo_id))
             await message.answer_media_group(media=media)
-            await message.answer("📌 Navigatsiya:", reply_markup=nav_kb.as_markup())
-            
-            if message.chat.id in ADMIN_IDS:
-                admin_kb = InlineKeyboardBuilder()
-                admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
-                admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
-                admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
-                admin_kb.adjust(1)
-                await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
-                
+            await message.answer("📌 Navigatsiya:", reply_markup=kb)
         elif listing.get('image_url'):
-            await message.answer_photo(listing['image_url'], caption=text, reply_markup=nav_kb.as_markup())
-            if message.chat.id in ADMIN_IDS:
-                admin_kb = InlineKeyboardBuilder()
-                admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
-                admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
-                admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
-                admin_kb.adjust(1)
-                await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
+            await message.answer_photo(listing['image_url'], caption=text, reply_markup=kb)
         else:
-            await message.answer(text, reply_markup=nav_kb.as_markup())
-            if message.chat.id in ADMIN_IDS:
-                admin_kb = InlineKeyboardBuilder()
-                admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing['id']}")
-                admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing['id']}")
-                admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing['id']}")
-                admin_kb.adjust(1)
-                await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
+            await message.answer(text, reply_markup=kb)
     except Exception as e:
-        print(f"❌ Xatolik: {e}")
-        await message.answer(text, reply_markup=nav_kb.as_markup())
+        print(f"Xatolik: {e}")
+        await message.answer(text, reply_markup=kb)
+
+@dp.callback_query(F.data == "back_to_regions")
+async def back_to_regions(call: types.CallbackQuery):
+    await call.answer()
+    await call.message.answer("📍 Viloyatni tanlang:", reply_markup=get_regions_keyboard())
 
 @dp.message(Command("view"))
 async def view_listing_by_id(message: types.Message):
@@ -283,23 +136,26 @@ async def view_listing_by_id(message: types.Message):
         listing_id = int(message.text.split()[1])
         listing = await get_listing_by_id(listing_id)
         
-        if not listing:
+        if not listing or listing['status'] != 'active':
             await message.answer("❌ Bunday ID bilan e'lon topilmadi!")
             return
         
         await increment_views(listing_id)
         
-        text = (
-            f"🏠 {listing['title']}\n"
-            f"📍 {listing['district']}\n"
-            f"💰 {listing['price']} so'm\n"
-            f"🛏 {listing['rooms']} xona\n"
-            f"📝 {listing['description']}\n"
-            f"📞 {listing['phone']}\n"
-            f"📊 Holat: {listing['status']}\n"
-            f"👁 Ko'rishlar: {listing['views_count']}\n"
-            f"🆔 ID: {listing['id']}"
-        )
+        text = f"""
+🏠 **{listing['title']}**
+
+📍 **Manzil:** {listing['region_name']}
+💰 **Narx:** {listing['price']} so'm
+🛏 **Xonalar:** {listing['rooms']} xona
+📞 **Telefon:** {listing['phone']}
+
+📝 **Tavsif:**
+{listing['description']}
+
+👁 Ko'rishlar: {listing['views_count']}
+🆔 ID: {listing['id']}
+"""
         
         if listing.get('media_group') and len(listing['media_group']) > 1:
             media = []
@@ -314,53 +170,18 @@ async def view_listing_by_id(message: types.Message):
         else:
             await message.answer(text)
             
-        if message.from_user.id in ADMIN_IDS:
-            admin_kb = InlineKeyboardBuilder()
-            admin_kb.button(text="❌ O'chirish", callback_data=f"admin_delete_{listing_id}")
-            admin_kb.button(text="✅ Sotildi", callback_data=f"admin_sold_{listing_id}")
-            admin_kb.button(text="🏠 Ijaraga berildi", callback_data=f"admin_rented_{listing_id}")
-            admin_kb.adjust(1)
-            await message.answer("👨‍💼 Admin amallari:", reply_markup=admin_kb.as_markup())
-            
     except (IndexError, ValueError):
-        await message.answer("❌ Noto'g'ri format. To'g'ri format: /view 123")
+        await message.answer("❌ Format: /view 123")
     except Exception as e:
         await message.answer(f"❌ Xatolik: {e}")
-
-@dp.callback_query(F.data.startswith("admin_delete_"))
-async def admin_quick_delete(callback: types.CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("🚫 Ruxsat yo'q!")
-        return
-    
-    listing_id = int(callback.data.replace("admin_delete_", ""))
-    await delete_listing_by_id(listing_id)
-    await callback.answer("✅ E'lon o'chirildi!")
-    await callback.message.delete()
-
-@dp.callback_query(F.data.startswith("admin_sold_"))
-async def admin_quick_sold(callback: types.CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("🚫 Ruxsat yo'q!")
-        return
-    
-    listing_id = int(callback.data.replace("admin_sold_", ""))
-    await update_listing_status(listing_id, 'sold')
-    await callback.answer("✅ Sotilgan deb belgilandi!")
-
-@dp.callback_query(F.data.startswith("admin_rented_"))
-async def admin_quick_rented(callback: types.CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("🚫 Ruxsat yo'q!")
-        return
-    
-    listing_id = int(callback.data.replace("admin_rented_", ""))
-    await update_listing_status(listing_id, 'rented')
-    await callback.answer("✅ Ijaraga berilgan deb belgilandi!")
 
 async def main():
     await init_db()
     print("✅ Bot ishga tushdi!")
+    
+    # Collector'ni alohida task'da ishga tushirish
+    collector_task = asyncio.create_task(run_collector())
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
